@@ -870,6 +870,7 @@ class DownloadController extends GetxController {
         videoUrl: i == 0 ? firstEpisodeVideoUrl : null,
         videoHeaders: i == 0 ? firstEpisodeHeaders : null,
         videoSubtitles: i == 0 ? firstEpisodeSubtitles : null,
+        videoAudios: i == 0 ? firstEpisodeAudios : null,
         media: media,
       );
     }
@@ -884,6 +885,7 @@ class DownloadController extends GetxController {
     String? videoUrl,
     Map<String, String>? videoHeaders,
     List<hive.Track>? videoSubtitles,
+    List<hive.Track>? videoAudios,
     required OfflineMedia media,
   }) {
     activeTasks.removeWhere((t) =>
@@ -911,7 +913,7 @@ class DownloadController extends GetxController {
       status: DownloadStatus.queued,
       videoHeaders: videoHeaders,
       subtitles: videoSubtitles,
-      audios: firstEpisodeAudios,
+      audios: videoAudios,
       media: media,
     );
 
