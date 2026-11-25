@@ -271,9 +271,12 @@ class MediaDownloader {
 
     if (_isMasterPlaylist(rootBody)) {
       _masterPlaylistBody = rootBody;
+      await _saveDebugPlaylist('master', rootBody, m3u8Url!);
       mediaM3u8Url = _resolveBestVariant(rootBody, m3u8Url!, null);
       mediaBody = await _fetchText(mediaM3u8Url, headers);
     }
+    await _saveDebugPlaylist('video', mediaBody, mediaM3u8Url);
+    Logger.i('[Download] Playlist de video: $mediaM3u8Url');
 
     final segments =
         await _parseMediaPlaylist(mediaBody, mediaM3u8Url, headers);
@@ -347,6 +350,22 @@ class MediaDownloader {
     return completer.future;
   }
 
+  /// Salva o texto das playlists para diagnostico sem precisar interceptar
+  /// intents ou depender de Ferramentas externas.
+  Future<void> _saveDebugPlaylist(
+      String name, String body, String url) async {
+    if (subDownloadDir == null) return;
+    try {
+      final dir = Directory(path.join(subDownloadDir!, 'Debug'));
+      await dir.create(recursive: true);
+      final file = File(path.join(
+          dir.path, 'Episode_${episodeNumber ?? '0'}_$name.m3u8.txt'));
+      await file.writeAsString('$url\n\n$body');
+    } catch (e) {
+      Logger.w('[Download] Nao salvou playlist de debug ($name): $e');
+    }
+  }
+
   Future<List<_SubtitleInput>> _downloadSubtitleFiles() async {
     final inputs = <_SubtitleInput>[];
     if (episodeNumber == null || subDownloadDir == null) return inputs;
@@ -404,10 +423,15 @@ class MediaDownloader {
           _masterPlaylistBody!, m3u8Url!)) {
         final url = rendition.file?.trim();
         if (url == null || url.isEmpty || !seenUrls.add(url)) continue;
+        Logger.i(
+            '[Download] Audio do playlist: ${rendition.label} -> $url');
         tracks.add(rendition);
       }
     }
 
+    for (final track in audios ?? <hive.Track>[]) {
+      Logger.i('[Download] Audio da fonte: ${track.label} -> ${track.file}');
+    }
     Logger.i(
         '[Download] ${tracks.length} faixa(s) de audio para baixar '
         '(${audios?.length ?? 0} da fonte, '
@@ -490,10 +514,13 @@ class MediaDownloader {
     String mediaBody = rootBody;
 
     if (_isMasterPlaylist(rootBody)) {
+      await _saveDebugPlaylist('audio_${index}_master', rootBody, url);
       mediaUrl = _resolveAudioRendition(rootBody, url) ??
           _resolveBestVariant(rootBody, url, null);
       mediaBody = await _fetchText(mediaUrl, headers);
     }
+    await _saveDebugPlaylist('audio_${index}_media', mediaBody, mediaUrl);
+    Logger.i('[Download] Playlist de audio $index: $mediaUrl');
 
     final segments = await _parseMediaPlaylist(mediaBody, mediaUrl, headers);
     if (segments.isEmpty) {
