@@ -326,6 +326,45 @@ class _CastDevicePaneState extends State<CastDevicePane> {
     );
   }
 
+  bool _isHlsPlayback(_CastPlaybackInfo? info) {
+    if (info == null) return false;
+    final path = Uri.tryParse(info.url)?.path.toLowerCase() ?? info.url.toLowerCase();
+    return path.endsWith('.m3u8') || info.url.toLowerCase().contains('.m3u8');
+  }
+
+  /// HLS is not reliably exposed through Roku Media Player's DLNA browser.
+  /// The Roku platform itself plays HLS well via ECP, which the existing Cast
+  /// implementation already uses. This reuses that path for m3u8 sources.
+  Future<void> _sendHlsToRoku() async {
+    final info = _currentPlayback();
+    if (info == null) return;
+
+    final roku = castService.discoveredDevices.firstWhereOrNull(
+      (device) => device.protocol == CastProtocol.roku,
+    );
+    if (roku == null) {
+      Get.snackbar('Servidor DLNA local', 'Nenhum Roku descoberto na rede.');
+      return;
+    }
+
+    if (localDlna.isRunning.value) await localDlna.stop();
+
+    final success = await castService.castMedia(
+      videoUrl: info.url,
+      headers: info.headers,
+      subtitleUrl: info.subtitleUrl,
+      subtitleLabel: info.subtitleLabel,
+      title: info.title,
+      startPosition: widget.controller.currentPosition.value,
+      device: roku,
+    );
+    if (success) {
+      widget.controller.pause();
+    } else {
+      Get.snackbar('Servidor DLNA local', 'Falha ao enviar o HLS para o Roku.');
+    }
+  }
+
   Future<void> _toggleLocalDlna() async {
     if (localDlna.isRunning.value) {
       await localDlna.stop();
@@ -418,6 +457,28 @@ class _CastDevicePaneState extends State<CastDevicePane> {
                 error,
                 size: 11,
                 color: theme.colorScheme.error,
+              ),
+            if (!running && _isHlsPlayback(info))
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: AnymeXText(
+                        'Fonte m3u8: o Roku Media Player pode não reproduzir '
+                        'HLS via DLNA. Envie direto ao Roku.',
+                        size: 11,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: castService.isCasting.value
+                          ? null
+                          : () => _sendHlsToRoku(),
+                      child: const AnymeXText('Enviar ao Roku'),
+                    ),
+                  ],
+                ),
               ),
           ],
         ),

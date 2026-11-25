@@ -83,6 +83,34 @@ A reprodução automática via DLNA não é parte do protótipo: o Roku Media Pl
 sempre inicia a reprodução pelo usuário. A ECP do Roku (`launch/15985`) usada
 pelo Cast atual continua disponível para os dispositivos já descobertos.
 
+### Fontes HLS (`.m3u8`)
+
+O proxy já republica o HLS em `/hls/master.m3u8` reescrevendo variantes,
+segmentos, chaves e legendas, sem baixar o vídeo inteiro. Porém o **Roku Media
+Player** não é um cliente HLS confiável via navegação DLNA — ele trata `.m3u8`
+como playlist e costuma falhar mesmo com `bitrate` correto.
+
+O Roku, por outro lado, reproduz HLS muito bem pela própria plataforma via
+**ECP** (`POST http://TV:8060/launch/15985?u=...&videoFormat=hls`), que já é
+usada pelo Cast existente. Por isso, quando a fonte atual é m3u8, o painel
+mostra o botão **Enviar ao Roku**, que usa essa rota. Isso não transcodifica e
+não cria um MP4: envia a URL do manifesto ao player nativo do Roku.
+
+Gerar um MP4 real a partir de HLS exigiria baixar/remuxar todos os segmentos
+(ou usar FFmpeg, uma dependência nativa grande). Isso foi **deliberadamente
+evitado** neste protótipo: violaria a restrição de não baixar o vídeo inteiro
+antes de reproduzir e não é necessário para o Roku, que aceita HLS direto.
+
+### Lista de episódios / arquivos (não implementado)
+
+O Roku Media Player aceita playlists `.M3U`/`.M3U8`, então é tecnicamente
+possível publicar um item `playlist.m3u8` no `ContentDirectory`. Hoje o servidor
+publica apenas **um** item virtual, porque o `CastProxyServer` é um singleton
+com uma única fonte por vez. Para uma lista real de episódios seria necessário
+estender o proxy para multiple sources (`/video?id=...`), resolver as URLs de
+cada episódio pelo extension ativo e gerar os `<res>` correspondentes. Isto
+fica como próxima fase, para não modificar o Cast existente sem validação.
+
 ### Erro `no valid bitrates` (-5)
 
 O Roku encontra e lista o servidor, mas ao iniciar informa `no valid bitrates`
