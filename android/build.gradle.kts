@@ -15,9 +15,12 @@ rootProject.layout.buildDirectory.set(file("../build"))
 subprojects {
     afterEvaluate {
         extensions.findByType(BaseExtension::class.java)?.apply {
-            // Nao sobrescreve o compileSdk: cada modulo (app e plugins)
-            // define o seu. Forcar 36 aqui fazia o Flutter achar que o app
-            // compila contra SDK 36 enquanto permission_handler pede 37.
+            // Todos os modulos precisam compilar contra o mesmo SDK mais alto.
+            // String "android-37" tambem e o formato que o cargokit espera
+            // (ele faz substring(8) para extrair o numero).
+            compileSdkVersion("android-37")
+            buildToolsVersion("37.0.0")
+
             compileOptions {
                 sourceCompatibility = JavaVersion.VERSION_17
                 targetCompatibility = JavaVersion.VERSION_17
