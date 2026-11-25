@@ -786,7 +786,14 @@ class _DoubleTapSeekWidgetState extends State<DoubleTapSeekWidget>
     if (isDoubleTap) {
       if (!widget.controller.isLocked.value && !_isFollowMode()) {
         HapticFeedback.lightImpact();
+        // togglePlayPause() calls onUserInteraction(), which forces the
+        // controls to show. Restore the previous visibility so pausing by
+        // double tap doesn't bring the whole overlay back.
+        final wasVisible = widget.controller.showControls.value;
         widget.controller.togglePlayPause();
+        if (!wasVisible) {
+          widget.controller.toggleControls(val: false);
+        }
       }
     } else {
       _singleTapTimer = Timer(const Duration(milliseconds: 260), () {
