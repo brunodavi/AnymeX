@@ -1,15 +1,9 @@
 name: Build and Release AnymeX (Android Debug APK)
 
-# Builds ONLY the Android APKs in debug mode and replaces the Android assets
-# of an existing release. Release tag/name/body are preserved; only the
-# AnymeX-Android-*.apk assets are overwritten with the debug builds.
+# Builds ONLY the Android APKs in debug mode and publishes them to a fixed
+# release ("debug-apk"). Re-running replaces only the Android APK assets.
 on:
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: "Release tag to update (leave empty to use the latest release)"
-        required: false
-        type: string
 
 env:
   FLUTTER_VERSION: "3.41.6"
@@ -22,25 +16,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Resolve release tag
-        id: release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${{ inputs.release_tag }}"
-          if [ -z "$TAG" ]; then
-            TAG=$(gh release view --json tagName --jq .tagName)
-          fi
-          if [ -z "$TAG" ] || ! gh release view "$TAG" >/dev/null 2>&1; then
-            echo "::error::Release '$TAG' not found. Provide a valid release_tag."
-            exit 1
-          fi
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Updating release: $TAG"
-
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.release.outputs.tag }}
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -157,10 +133,13 @@ jobs:
           name: android-debug-all
           path: build/app/outputs/flutter-apk/AnymeX-Android-*.apk
 
-      - name: Update release assets (debug APKs, same asset names)
+      - name: Publish debug APKs to the fixed release
         uses: ncipollo/release-action@v1
         with:
-          tag: ${{ steps.release.outputs.tag }}
+          tag: debug-apk
+          name: AnymeX Debug APK
+          commit: ${{ github.sha }}
+          body: "Android debug APK builds. Re-running this workflow replaces these assets."
           artifacts: build/app/outputs/flutter-apk/AnymeX-Android-*.apk
           allowUpdates: true
           replacesArtifacts: true

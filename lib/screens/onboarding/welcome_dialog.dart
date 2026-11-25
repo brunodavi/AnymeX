@@ -20,7 +20,6 @@ import 'package:get/get.dart';
 import 'package:hugeicons/hugeicons.dart';
 import 'package:flutter_iconly/flutter_iconly.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:anymex/widgets/anymex_widgets/anymex_dialog.dart';
 import 'package:anymex/widgets/anymex_widgets/anymex_text.dart';
 import 'package:anymex/widgets/helper/tv_wrapper.dart';
 
@@ -348,110 +347,4 @@ void showWelcomeDialogg(BuildContext context) {
   ).then((_) {
     General.isFirstTime.set(false);
   });
-}
-
-void showDiscordJoinDialog(BuildContext context) {
-  final settings = Get.find<Settings>();
-  bool isUnlocked = KvHelper.get<bool>('anymex_discord_notice_unlocked', defaultVal: false);
-
-  showDialog(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogCtx) {
-      return StatefulBuilder(
-        builder: (dialogContext, setDialogState) {
-          return PopScope(
-            canPop: false,
-            child: AnymeXDialog(
-              title: context.l10n.discordTakenDown,
-              forceAction: true,
-              showCancelButton: false,
-              confirmText: context.l10n.okay,
-              isConfirmEnabled: isUnlocked,
-              onConfirm: () {},
-              contentWidget: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  AnymeXText(
-                    isUnlocked
-                        ? 'Our main Discord server has been taken down. Please join our new Discord server, and also join our Telegram channel for backup updates!\n\nYou have already visited our social links, so the Okay button is unlocked.'
-                        : 'Our main Discord server has been taken down. Please join our new Discord server, and also join our Telegram channel for backup updates!\n\nOnce you click to join one of them, the Okay button below will unlock.',
-                    size: 14,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    textAlign: TextAlign.center,
-                    maxLines: 999,
-                  ),
-                  const SizedBox(height: 20),
-                  AnymexOnTap(
-                    onTap: () async {
-                      General.hasJoinedNewDiscord.set(true);
-                      final url = settings.discordUrl.value;
-                      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-                      KvHelper.set('anymex_discord_notice_unlocked', true);
-                      setDialogState(() {
-                        isUnlocked = true;
-                      });
-                    },
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF5865F2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(HugeIcons.strokeRoundedDiscord, color: Colors.white, size: 20),
-                          SizedBox(width: 8),
-                          AnymeXText(
-                            context.l10n.joinNewDiscord,
-                            color: Colors.white,
-                            variant: TextVariant.bold,
-                            size: 13,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  AnymexOnTap(
-                    onTap: () async {
-                      final url = settings.telegramUrl.value;
-                      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
-                      KvHelper.set('anymex_discord_notice_unlocked', true);
-                      setDialogState(() {
-                        isUnlocked = true;
-                      });
-                    },
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0088CC),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(HugeIcons.strokeRoundedTelegram, color: Colors.white, size: 20),
-                          SizedBox(width: 8),
-                          AnymeXText(
-                            context.l10n.joinTelegramChannel,
-                            color: Colors.white,
-                            variant: TextVariant.bold,
-                            size: 13,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      );
-    },
-  );
 }

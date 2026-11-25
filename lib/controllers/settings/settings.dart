@@ -28,9 +28,6 @@ class Settings extends GetxController {
   late Rx<PlayerSettings> playerSettings;
   final RxString discordUrl = 'https://discord.gg/GKVvSyXDUD'.obs;
   final RxString telegramUrl = 'https://t.me/AnymeX_Discussion'.obs;
-  final RxBool showJoinDialog = true.obs;
-  bool linksFetched = false;
-  VoidCallback? onLinksReady;
 
   final canShowUpdate = true.obs;
   final playerControlThemeRx = 'default'.obs;
@@ -270,16 +267,9 @@ class Settings extends GetxController {
         if (data['telegram'] != null) {
           telegramUrl.value = data['telegram'];
         }
-        final joinVal = data['showJoinDialog'];
-        if (joinVal != null) {
-          showJoinDialog.value = joinVal as bool;
-        }
       }
     } catch (e) {
       Logger.e("Failed to fetch invite links: $e");
-    } finally {
-      linksFetched = true;
-      onLinksReady?.call();
     }
   }
 
@@ -354,28 +344,6 @@ class Settings extends GetxController {
   void showWelcomeDialog(BuildContext context) {
     if (General.isFirstTime.get<bool>(true)) {
       showWelcomeDialogg(context);
-      return;
-    }
-
-    if (linksFetched) {
-      _checkAndShowJoinDialog(context);
-    } else {
-      onLinksReady = () {
-        _checkAndShowJoinDialog(context);
-      };
-    }
-  }
-
-  void _checkAndShowJoinDialog(BuildContext context) {
-    final showOnline = showJoinDialog.value;
-    if (showOnline) {
-      showDiscordJoinDialog(context);
-    } else {
-      final count = General.joinDialogShowCount.get<int>(0);
-      if (count < 3) {
-        General.joinDialogShowCount.set(count + 1);
-        showDiscordJoinDialog(context);
-      }
     }
   }
 
