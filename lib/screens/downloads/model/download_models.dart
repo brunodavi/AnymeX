@@ -49,6 +49,8 @@ class ActiveDownloadTask {
   String? errorMessage;
   List<t.Track>? subtitles;
   List<t.Track>? audios;
+  bool autoTranslateSubtitles;
+  String? subtitleTranslateTo;
   List<hive.Video>? availableServers;
   OfflineMedia? media;
 
@@ -67,6 +69,8 @@ class ActiveDownloadTask {
     this.errorMessage,
     this.subtitles,
     this.audios,
+    this.autoTranslateSubtitles = false,
+    this.subtitleTranslateTo,
     this.availableServers,
     this.media,
   });
@@ -86,6 +90,8 @@ class ActiveDownloadTask {
         'errorMessage': errorMessage,
         'subtitles': subtitles?.map((t) => t.toJson()).toList(),
         'audios': audios?.map((t) => t.toJson()).toList(),
+        'autoTranslateSubtitles': autoTranslateSubtitles,
+        'subtitleTranslateTo': subtitleTranslateTo,
         if (media != null) 'media': media!.toJson(),
       };
 
@@ -110,6 +116,9 @@ class ActiveDownloadTask {
         audios: (json['audios'] as List<dynamic>?)
             ?.map((e) => t.Track.fromJson(e as Map<String, dynamic>))
             .toList(),
+        autoTranslateSubtitles:
+            json['autoTranslateSubtitles'] as bool? ?? false,
+        subtitleTranslateTo: json['subtitleTranslateTo'] as String?,
         media: json['media'] != null
             ? OfflineMedia.fromJson(json['media'] as Map<String, dynamic>)
             : null,

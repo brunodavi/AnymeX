@@ -11,6 +11,7 @@ import 'package:path/path.dart' as path;
 import 'package:anymex/database/isar_models/track.dart' as hive;
 import 'package:anymex/utils/download_isolate_pool.dart';
 import 'package:anymex/utils/logger.dart';
+import 'package:anymex/utils/subtitle_translator.dart';
 
 class HlsSegmentKey {
   final String method;
@@ -48,11 +49,13 @@ class _SubtitleInput {
   final String path;
   final String label;
   final String codec;
+  final String? language;
 
   const _SubtitleInput({
     required this.path,
     required this.label,
     required this.codec,
+    this.language,
   });
 }
 
@@ -70,10 +73,14 @@ class MediaDownloadResult {
   /// precisa carrega-las como faixas externas.
   final List<hive.Track>? audioTracks;
 
+  /// Faixas de legenda locais (originais + traduzida), usadas no fallback.
+  final List<hive.Track>? subtitleTracks;
+
   const MediaDownloadResult({
     required this.filePath,
     required this.tracksMuxed,
     this.audioTracks,
+    this.subtitleTracks,
   });
 }
 
@@ -89,6 +96,11 @@ class MediaDownloader {
   final String? videoFileName;
   final Map<String, String>? headers;
   final String? episodeNumber;
+
+  /// Traduz legendas durante o download e embute a versao traduzida como
+  /// faixa extra no MKV (via Google Translate).
+  final bool autoTranslate;
+  final String? translateTo;
 
   final List<String> _auxTaskIds = <String>[];
   int? _ffmpegSessionId;
@@ -111,6 +123,8 @@ class MediaDownloader {
     this.headers,
     this.concurrentDownloads = 1,
     this.episodeNumber,
+    this.autoTranslate = false,
+    this.translateTo,
   });
 
   static Future<void> initializeIsolatePool({int poolSize = 6}) async {
@@ -188,6 +202,16 @@ class MediaDownloader {
     if (lower.contains('espan') || lower.contains('spanish')) return 'es';
     final cleaned = label.replaceAll(RegExp(r'[^A-Za-z]'), '').toLowerCase();
     return cleaned.isEmpty ? 'und' : cleaned;
+  }
+
+  /// Usado para nao traduzir uma legenda que ja esta no idioma desejado.
+  static String subtitleLanguageCode(String label) => _languageCode(label);
+
+  static bool _sameLanguage(String? a, String? b) {
+    if (a == null || b == null) return false;
+    final left = a.toLowerCase().split('-').first;
+    final right = b.toLowerCase().split('-').first;
+    return left.isNotEmpty && left == right;
   }
 
   static String _changeExtension(String filePath, String extension) {
@@ -395,13 +419,49 @@ class MediaDownloader {
       }
       if (subtitleFile.existsSync() && subtitleFile.lengthSync() > 0) {
         final lower = path.extension(subtitleFile.path).toLowerCase();
+        final label = element.label?.trim().isNotEmpty == true
+            ? element.label!.trim()
+            : 'Subtitle ${inputs.length + 1}';
+        final sourceLanguage = subtitleLanguageCode(label);
         inputs.add(_SubtitleInput(
           path: subtitleFile.path,
-          label: element.label?.trim().isNotEmpty == true
-              ? element.label!.trim()
-              : 'Subtitle ${inputs.length + 1}',
+          label: label,
           codec: (lower == '.ass' || lower == '.ssa') ? 'ass' : 'srt',
+          language: sourceLanguage,
         ));
+
+        if (autoTranslate &&
+            translateTo != null &&
+            translateTo != 'none' &&
+            !_sameLanguage(sourceLanguage, translateTo!)) {
+          try {
+            final content = await subtitleFile.readAsString();
+            final translatedSrt =
+                await SubtitleTranslator.translateSubtitleToSrt(
+              content: content,
+              targetLang: translateTo!,
+            );
+            if (translatedSrt != null && translatedSrt.trim().isNotEmpty) {
+              final translatedName = sanitizePathSegment(
+                '${label}_${translateTo}_GoogleTranslate.srt',
+              );
+              final translatedFile =
+                  File(path.join(subFolder, translatedName));
+              await translatedFile.writeAsString(translatedSrt);
+              final translatedLabel =
+                  '${SubtitleTranslator.languages[translateTo] ?? translateTo} (Google Translate)';
+              inputs.add(_SubtitleInput(
+                path: translatedFile.path,
+                label: translatedLabel,
+                codec: 'srt',
+                language: translateTo,
+              ));
+              Logger.i('[Download] Legenda traduzida: $translatedLabel');
+            }
+          } catch (e) {
+            Logger.i('[Download] Traducao ignorada para $label: $e');
+          }
+        }
       }
     }
     return inputs;
@@ -636,7 +696,8 @@ class MediaDownloader {
         '-map', '${subtitleInputOffset + i}:s:0',
         '-c:s:$i', sub.codec,
         '-metadata:s:s:$i', 'title=${sub.label}',
-        '-metadata:s:s:$i', 'language=${_languageCode(sub.label)}',
+        '-metadata:s:s:$i',
+        'language=${sub.language ?? _languageCode(sub.label)}',
       ]);
       if (i == 0) args.addAll(['-disposition:s:$i', 'default']);
     }
@@ -682,10 +743,28 @@ class MediaDownloader {
       }
     }
 
+    final persistentSubtitles = <hive.Track>[];
+    if (subtitles.isNotEmpty) {
+      final subDir = Directory(path.join(
+          subDownloadDir!, 'Episode_${episodeNumber ?? '0'}_subs'));
+      await subDir.create(recursive: true);
+      for (final sub in subtitles) {
+        final savedPath = path.join(subDir.path, path.basename(sub.path));
+        if (path.normalize(savedPath) != path.normalize(sub.path)) {
+          await File(sub.path).copy(savedPath);
+        }
+        persistentSubtitles.add(hive.Track(
+          file: Uri.file(savedPath).toString(),
+          label: sub.label,
+        ));
+      }
+    }
+
     return MediaDownloadResult(
       filePath: fallbackTsPath,
       tracksMuxed: false,
       audioTracks: persistentAudios,
+      subtitleTracks: persistentSubtitles,
     );
   }
 

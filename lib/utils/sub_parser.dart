@@ -1,5 +1,16 @@
-import 'package:anymex/screens/anime/watch/controller/player_controller.dart';
 import 'package:subtitle/subtitle.dart';
+
+class SubtitleCue {
+  final Duration start;
+  final Duration end;
+  final String text;
+
+  const SubtitleCue({
+    required this.start,
+    required this.end,
+    required this.text,
+  });
+}
 
 class SubParser {
   static Future<List<SubtitleCue>> parseSubtitles(String content) async {

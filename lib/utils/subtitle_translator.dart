@@ -1,125 +1,159 @@
-import 'dart:async';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
+
 import 'package:anymex/utils/logger.dart';
+import 'package:anymex/utils/sub_parser.dart';
+import 'package:http/http.dart' as http;
 
 class SubtitleTranslator {
+  SubtitleTranslator._();
+
+  static const String _endpoint =
+      'https://translate.googleapis.com/translate_a/single?client=gtx';
+
+  /// Limite conservador para não traduzir legendas enormes em segundo plano.
+  static const int maxCuesPerTrack = 800;
+
   static final Map<String, String> _cache = {};
 
-  static Future<String> translate(String text, String targetLang) async {
-    if (text.isEmpty || targetLang == 'none') {
-      return text;
-    }
-    
-    final cacheKey = '$targetLang:$text';
-    if (_cache.containsKey(cacheKey)) {
-      return _cache[cacheKey]!;
-    }
-
-    try {
-      final url = Uri.parse(
-          "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=$targetLang&dt=t&q=${Uri.encodeComponent(text)}");
-
-      final response = await http.get(url).timeout(const Duration(seconds: 5));
-    
-      if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body);
-        String translated = "";
-        
-        if (data[0] != null) {
-          for (var part in data[0]) {
-            translated += part[0].toString();
-          }
-        }
-        
-        _cache[cacheKey] = translated;
-        return translated;
-      } else {
-        Logger.e('[SubtitleTranslator] API returned ${response.statusCode}: ${response.body}');
-      }
-    } catch (e) {
-      Logger.e('[SubtitleTranslator] Translation Error: $e');
-    }
-    return text;
-  }
-
-  static const Map<String, String> languages = {
-    'am': 'Amharic',
-    'ar': 'Arabic',
-    'as': 'Assamese',
-    'bn': 'Bengali',
-    'brx': 'Bodo',
-    'my': 'Burmese',
-    'zh-CN': 'Chinese (Simplified)',
-    'zh-TW': 'Chinese (Traditional)',
-    'hr': 'Croatian',
-    'cs': 'Czech',
-    'da': 'Danish',
-    'doi': 'Dogri',
-    'nl': 'Dutch',
+  static final Map<String, String> languages = {
+    'none': 'None (Original)',
     'en': 'English',
-    'en-US': 'English (US)',
-    'fi': 'Finnish',
-    'tl': 'Filipino',
+    'es': 'Spanish',
     'fr': 'French',
     'de': 'German',
-    'el': 'Greek',
-    'gu': 'Gujarati',
-    'ha': 'Hausa',
-    'he': 'Hebrew',
-    'hi': 'Hindi',
-    'hu': 'Hungarian',
-    'ig': 'Igbo',
-    'id': 'Indonesian',
     'it': 'Italian',
-    'ja': 'Japanese',
-    'kn': 'Kannada',
-    'ks': 'Kashmiri',
-    'kk': 'Kazakh',
-    'km': 'Khmer',
-    'kok': 'Konkani',
-    'ko': 'Korean',
-    'lo': 'Lao',
-    'es-419': 'Latin American Spanish',
-    'lv': 'Latvian',
-    'lt': 'Lithuanian',
-    'mk': 'Macedonian',
-    'ma': 'Maithili',
-    'ms': 'Malay',
-    'ml': 'Malayalam',
-    'mni-Mtei': 'Meitei (Manipuri)',
-    'mr': 'Marathi',
-    'ne': 'Nepali',
-    'no': 'Norwegian',
-    'or': 'Odia',
-    'fa': 'Persian',
-    'pl': 'Polish',
     'pt': 'Portuguese',
     'pt-BR': 'Portuguese (Brazil)',
-    'pa': 'Punjabi',
-    'qu': 'Quechua',
-    'ro': 'Romanian',
     'ru': 'Russian',
-    'sa': 'Sanskrit',
-    'sat': 'Santali',
-    'gd': 'Scottish Gaelic',
-    'sr': 'Serbian',
-    'si': 'Sinhala',
-    'sk': 'Slovak',
-    'sl': 'Slovenian',
-    'es': 'Spanish',
-    'sw': 'Swahili',
-    'sv': 'Swedish',
-    'ta': 'Tamil',
-    'te': 'Telugu',
-    'th': 'Thai',
-    'tr': 'Turkish',
-    'uk': 'Ukrainian',
-    'ur': 'Urdu',
-    'uz': 'Uzbek',
+    'ja': 'Japanese',
+    'ko': 'Korean',
+    'zh-CN': 'Chinese (Simplified)',
+    'zh-TW': 'Chinese (Traditional)',
+    'hi': 'Hindi',
+    'id': 'Indonesian',
     'vi': 'Vietnamese',
-    'cy': 'Welsh',
-    'yo': 'Yoruba',
-    'zu': 'Zulu',
+    'th': 'Thai',
+    'ar': 'Arabic',
+    'tr': 'Turkish',
+    'nl': 'Dutch',
+    'pl': 'Polish',
+    'sv': 'Swedish',
   };
+
+  static Future<String> translate(String text, String targetLang) async {
+    if (targetLang == 'none' || text.trim().isEmpty) return text;
+    final cacheKey = '$targetLang::${text.trim()}';
+    final cached = _cache[cacheKey];
+    if (cached != null) return cached;
+
+    try {
+      final uri = Uri.parse(
+        '$_endpoint&sl=auto&tl=${Uri.encodeComponent(targetLang)}&dt=t&q=${Uri.encodeComponent(text.trim())}',
+      );
+      final response = await http.get(uri).timeout(const Duration(seconds: 5));
+      if (response.statusCode != 200) return text;
+
+      final decoded = jsonDecode(response.body);
+      final parts = decoded is List && decoded.isNotEmpty ? decoded[0] : null;
+      if (parts is! List) return text;
+
+      final translated = parts
+          .whereType<List>()
+          .map((e) => e.isNotEmpty ? e[0].toString() : '')
+          .join()
+          .trim();
+      if (translated.isEmpty) return text;
+
+      _cache[cacheKey] = translated;
+      return translated;
+    } catch (_) {
+      return text;
+    }
+  }
+
+  /// Traduz o texto de cada cue, preservando timestamps e textos repetidos.
+  static Future<List<SubtitleCue>> translateCues(
+    List<SubtitleCue> cues,
+    String targetLang, {
+    int concurrency = 6,
+  }) async {
+    if (cues.isEmpty || targetLang == 'none') return cues;
+
+    final uniqueTexts = <String>[];
+    final seen = <String>{};
+    for (final cue in cues) {
+      final t = cue.text.trim();
+      if (t.isEmpty || !seen.add(t)) continue;
+      uniqueTexts.add(t);
+    }
+
+    Logger.i(
+      '[Translate] ${uniqueTexts.length} texto(s) único(s) para $targetLang',
+    );
+
+    for (var i = 0; i < uniqueTexts.length; i += concurrency) {
+      final batch = uniqueTexts.skip(i).take(concurrency).toList();
+      await Future.wait(
+        batch.map((text) async {
+          final result = await translate(text, targetLang);
+          if (result != text) _cache['$targetLang::$text'] = result;
+        }),
+      );
+    }
+
+    return cues
+        .map(
+          (c) => SubtitleCue(
+            start: c.start,
+            end: c.end,
+            text: _cache['$targetLang::${c.text.trim()}'] ?? c.text,
+          ),
+        )
+        .toList();
+  }
+
+  /// Converte cues em SRT com os mesmos tempos de início/fim.
+  static String buildSrt(List<SubtitleCue> cues) {
+    final buffer = StringBuffer();
+    for (var i = 0; i < cues.length; i++) {
+      final cue = cues[i];
+      buffer
+        ..writeln(i + 1)
+        ..writeln('${_formatTime(cue.start)} --> ${_formatTime(cue.end)}')
+        ..writeln(cue.text.replaceAll('\n', ' '))
+        ..writeln();
+    }
+    return buffer.toString();
+  }
+
+  /// Helper usado pelo downloader: parseia, traduz e devolve um SRT pronto.
+  static Future<String?> translateSubtitleToSrt({
+    required String content,
+    required String targetLang,
+  }) async {
+    if (targetLang == 'none') return null;
+    try {
+      final cues = await SubParser.parseSubtitles(content);
+      if (cues.isEmpty) return null;
+      if (cues.length > maxCuesPerTrack) {
+        Logger.i(
+          '[Translate] Pulando tradução: ${cues.length} cues > $maxCuesPerTrack',
+        );
+        return null;
+      }
+      final translated = await translateCues(cues, targetLang);
+      return buildSrt(translated);
+    } catch (e) {
+      Logger.e('[Translate] Falha ao traduzir legenda: $e');
+      return null;
+    }
+  }
+
+  static String _formatTime(Duration d) {
+    final hours = d.inHours.toString().padLeft(2, '0');
+    final minutes = (d.inMinutes % 60).toString().padLeft(2, '0');
+    final seconds = (d.inSeconds % 60).toString().padLeft(2, '0');
+    final millis = (d.inMilliseconds % 1000).toString().padLeft(3, '0');
+    return '$hours:$minutes:$seconds,$millis';
+  }
 }
