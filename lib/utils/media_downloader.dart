@@ -93,6 +93,10 @@ class MediaDownloader {
   final List<String> _auxTaskIds = <String>[];
   int? _ffmpegSessionId;
 
+  /// Playlist master original, usada para descobrir rendicoes de audio que
+  /// nao vem em `Video.audios` (o player online as le direto do HLS).
+  String? _masterPlaylistBody;
+
   static var httpClient = http.Client();
 
   MediaDownloader({
@@ -266,6 +270,7 @@ class MediaDownloader {
     String mediaBody = rootBody;
 
     if (_isMasterPlaylist(rootBody)) {
+      _masterPlaylistBody = rootBody;
       mediaM3u8Url = _resolveBestVariant(rootBody, m3u8Url!, null);
       mediaBody = await _fetchText(mediaM3u8Url, headers);
     }
@@ -385,8 +390,29 @@ class MediaDownloader {
 
   Future<List<_AudioInput>> _downloadAudioFiles() async {
     final inputs = <_AudioInput>[];
-    final tracks = audios ?? <hive.Track>[];
-    if (tracks.isEmpty || subDownloadDir == null) return inputs;
+    final tracks = <hive.Track>[...(audios ?? <hive.Track>[])];
+    if (subDownloadDir == null) return inputs;
+
+    // O player online tambem le faixas de audio declaradas no proprio M3U8
+    // master (#EXT-X-MEDIA:TYPE=AUDIO). Elas nem sempre chegam em audios.
+    final seenUrls = <String>{
+      for (final track in tracks)
+        if (track.file != null && track.file!.isNotEmpty) track.file!.trim(),
+    };
+    if (_masterPlaylistBody != null && m3u8Url != null) {
+      for (final rendition in _parseAudioRenditions(
+          _masterPlaylistBody!, m3u8Url!)) {
+        final url = rendition.file?.trim();
+        if (url == null || url.isEmpty || !seenUrls.add(url)) continue;
+        tracks.add(rendition);
+      }
+    }
+
+    Logger.i(
+        '[Download] ${tracks.length} faixa(s) de audio para baixar '
+        '(${audios?.length ?? 0} da fonte, '
+        '${tracks.length - (audios?.length ?? 0)} do playlist)');
+    if (tracks.isEmpty) return inputs;
 
     final outDir =
         Directory(path.join(subDownloadDir!, 'temp_$taskId', 'audio'));
@@ -410,13 +436,21 @@ class MediaDownloader {
           await _downloadDirectAudio(url, outPath, audioTaskId);
         }
         final file = File(outPath);
-        if (file.existsSync() && file.lengthSync() > 0) {
-          inputs.add(_AudioInput(
-            path: outPath,
-            label: label,
-            language: _languageCode(label),
-          ));
+        if (!file.existsSync() || file.lengthSync() == 0) {
+          Logger.w('[Download] Audio "$label" veio vazio: $url');
+          continue;
         }
+        if (!await _fileHasAudioStream(outPath)) {
+          Logger.w(
+              '[Download] Audio "$label" nao contem stream de audio; '
+              'ignorado no mux: $outPath');
+          continue;
+        }
+        inputs.add(_AudioInput(
+          path: outPath,
+          label: label,
+          language: _languageCode(label),
+        ));
       } catch (e) {
         Logger.e('[Download] Falha ao baixar faixa de audio "$label": $e');
       }
@@ -531,6 +565,11 @@ class MediaDownloader {
       Logger.e('[Download] FFprobe nao conseguiu ler as faixas do HLS: $e');
     }
 
+    Logger.i(
+        '[Download] Mux: videos=${File(videoTs).lengthSync()} bytes, '
+        'audio_embutido=$embeddedAudioCount, audio_externo=${audios.length}, '
+        'legendas=${subtitles.length}');
+
     final args = <String>[
       '-y',
       '-i', videoTs,
@@ -539,7 +578,7 @@ class MediaDownloader {
       '-map', '0:v:0',
       '-c:v', 'copy',
       if (embeddedAudioCount > 0) ...['-map', '0:a?'],
-      for (var i = 0; i < audios.length; i++) ...['-map', '${i + 1}:a:0?'],
+      for (var i = 0; i < audios.length; i++) ...['-map', '${i + 1}:a:0'],
       '-c:a', 'copy',
     ];
 
@@ -706,6 +745,55 @@ class MediaDownloader {
 
   static bool _isMasterPlaylist(String body) =>
       body.contains('#EXT-X-STREAM-INF') || body.contains('#EXT-X-MEDIA:');
+
+  static List<hive.Track> _parseAudioRenditions(
+      String body, String baseUrl) {
+    final tracks = <hive.Track>[];
+    final seen = <String>{};
+    var index = 0;
+    for (final raw in body.split('\n')) {
+      final line = raw.trim();
+      if (!line.startsWith('#EXT-X-MEDIA:') ||
+          !RegExp(r'TYPE\s*=\s*"?AUDIO"?', caseSensitive: false)
+              .hasMatch(line)) {
+        continue;
+      }
+      final uriMatch = RegExp(r'URI="([^"]+)"').firstMatch(line);
+      if (uriMatch == null) continue;
+
+      final url = _resolveUrl(uriMatch.group(1)!, baseUrl);
+      if (!seen.add(url)) continue;
+
+      final name = RegExp(r'NAME="([^"]+)"').firstMatch(line)?.group(1);
+      final lang =
+          RegExp(r'LANGUAGE="([^"]+)"').firstMatch(line)?.group(1);
+      final channels =
+          RegExp(r'CHANNELS="([^"]+)"').firstMatch(line)?.group(1);
+      final label = [
+        if (name != null && name.isNotEmpty) name,
+        if (lang != null && lang.isNotEmpty) lang,
+        if (channels != null && channels.isNotEmpty) '$channels ch',
+      ].join(' ').trim();
+
+      tracks.add(hive.Track(
+        file: url,
+        label: label.isEmpty ? 'Audio ${index + 1}' : label,
+      ));
+      index++;
+    }
+    return tracks;
+  }
+
+  static Future<bool> _fileHasAudioStream(String filePath) async {
+    try {
+      final session = await FFprobeKit.getMediaInformation(filePath);
+      final info = session.getMediaInformation();
+      return info?.getStreams().any((s) => s.getType() == 'audio') ?? false;
+    } catch (e) {
+      Logger.w('[Download] FFprobe nao leu $filePath: $e');
+      return false;
+    }
+  }
 
   static String? _resolveAudioRendition(String body, String baseUrl) {
     String? firstUri;
