@@ -7,6 +7,7 @@ import 'package:anymex/widgets/common/anymex_slider_m3.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
 import '../cast_service.dart';
+import '../local_dlna_server.dart';
 
 class CastDeviceDialog {
   static void show(BuildContext context, PlayerController controller) {
@@ -25,12 +26,33 @@ class CastDevicePane extends StatefulWidget {
 
 class _CastDevicePaneState extends State<CastDevicePane> {
   final castService = CastService.instance;
+  final localDlna = LocalDlnaServer.instance;
   final RxString _connectingDeviceId = ''.obs;
+  Worker? _sourceWorker;
 
   @override
   void initState() {
     super.initState();
     castService.startDiscovery();
+    // Keep the virtual DLNA file in sync when the episode/track changes.
+    _sourceWorker = ever(widget.controller.selectedVideo, (_) async {
+      if (!localDlna.isRunning.value) return;
+      final info = _currentPlayback();
+      if (info == null) return;
+      final source = await LocalDlnaSource.fromPlayback(
+        url: info.url,
+        headers: info.headers,
+        subtitleUrl: info.subtitleUrl,
+        title: info.title,
+      );
+      await localDlna.updateSource(source);
+    });
+  }
+
+  @override
+  void dispose() {
+    _sourceWorker?.dispose();
+    super.dispose();
   }
 
   void _closePane() {
@@ -273,14 +295,12 @@ class _CastDevicePaneState extends State<CastDevicePane> {
     });
   }
 
-  Future<void> _handleDeviceTap(CastDevice device) async {
+  _CastPlaybackInfo? _currentPlayback() {
     final videoUrl = widget.controller.selectedVideo.value?.url ?? widget.controller.offlineVideoPath;
-    final headers = widget.controller.selectedVideo.value?.headers;
-    if (videoUrl == null || videoUrl.isEmpty) return;
+    if (videoUrl == null || videoUrl.isEmpty) return null;
 
     String? subUrl;
     String? subLabel;
-
     final subs = widget.controller.selectedVideo.value?.subtitles;
     if (subs != null && subs.isNotEmpty) {
       final eng = subs.firstWhereOrNull((s) => (s.label ?? '').toLowerCase().contains('eng')) ?? subs.first;
@@ -295,16 +315,129 @@ class _CastDevicePaneState extends State<CastDevicePane> {
     final title = widget.controller.anilistData.title.isNotEmpty
         ? widget.controller.anilistData.title
         : (widget.controller.currentEpisode.value.title ?? 'AnymeX');
+
+    return _CastPlaybackInfo(
+      url: videoUrl,
+      headers: widget.controller.selectedVideo.value?.headers,
+      subtitleUrl: subUrl,
+      subtitleLabel: subLabel,
+      title: title,
+    );
+  }
+
+  Future<void> _toggleLocalDlna() async {
+    if (localDlna.isRunning.value) {
+      await localDlna.stop();
+      return;
+    }
+
+    final info = _currentPlayback();
+    if (info == null) {
+      Get.snackbar('Servidor DLNA local', 'Nenhum vídeo em reprodução.');
+      return;
+    }
+    if (castService.isCasting.value) {
+      Get.snackbar('Servidor DLNA local', 'Desconecte o Cast atual primeiro.');
+      return;
+    }
+
+    final source = await LocalDlnaSource.fromPlayback(
+      url: info.url,
+      headers: info.headers,
+      subtitleUrl: info.subtitleUrl,
+      title: info.title,
+    );
+    final started = await localDlna.start(source);
+    if (!started) {
+      Get.snackbar(
+        'Servidor DLNA local',
+        localDlna.lastError.value ?? 'Falha ao iniciar o servidor.',
+      );
+      return;
+    }
+    widget.controller.pause();
+  }
+
+  Widget _buildLocalDlnaCard(ThemeData theme) {
+    return Obx(() {
+      final running = localDlna.isRunning.value;
+      final url = localDlna.proxyUrl.value;
+      final error = localDlna.lastError.value;
+      final info = _currentPlayback();
+
+      return Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.25),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: theme.colorScheme.secondary.withValues(alpha: 0.3),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                Icons.dvr_rounded,
+                color: theme.colorScheme.primary,
+              ),
+              title: const AnymeXText(
+                'Servidor DLNA local',
+                variant: TextVariant.bold,
+                size: 14,
+              ),
+              subtitle: AnymeXText(
+                running
+                    ? 'Ativo · ${url ?? ''}'
+                    : 'Disponibiliza o vídeo atual para TVs na mesma rede',
+                size: 11,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              trailing: TextButton(
+                onPressed: (!running && castService.isCasting.value)
+                    ? null
+                    : () => _toggleLocalDlna(),
+                child: AnymeXText(running ? 'Parar' : 'Iniciar'),
+              ),
+            ),
+            if (running)
+              AnymeXText(
+                'No Roku: abra o Roku Media Player, selecione '
+                '“AnymeX (Servidor DLNA local)” → Videos → '
+                '${info?.title ?? 'vídeo'}.',
+                size: 11,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            if (!running && error != null)
+              AnymeXText(
+                error,
+                size: 11,
+                color: theme.colorScheme.error,
+              ),
+          ],
+        ),
+      );
+    });
+  }
+
+  Future<void> _handleDeviceTap(CastDevice device) async {
+    final info = _currentPlayback();
+    if (info == null) return;
+    if (localDlna.isRunning.value) await localDlna.stop();
+
     final startPos = widget.controller.currentPosition.value;
 
     _connectingDeviceId.value = device.id;
     try {
       final success = await castService.castMedia(
-        videoUrl: videoUrl,
-        headers: headers,
-        subtitleUrl: subUrl,
-        subtitleLabel: subLabel,
-        title: title,
+        videoUrl: info.url,
+        headers: info.headers,
+        subtitleUrl: info.subtitleUrl,
+        subtitleLabel: info.subtitleLabel,
+        title: info.title,
         startPosition: startPos,
         device: device,
       );
@@ -375,6 +508,7 @@ class _CastDevicePaneState extends State<CastDevicePane> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildActiveCastingCard(context.theme),
+                  _buildLocalDlnaCard(context.theme),
                   _buildDeviceList(context.theme),
                 ],
               ),
@@ -382,4 +516,20 @@ class _CastDevicePaneState extends State<CastDevicePane> {
           ),
         ));
   }
+}
+
+class _CastPlaybackInfo {
+  final String url;
+  final Map<String, String>? headers;
+  final String? subtitleUrl;
+  final String? subtitleLabel;
+  final String title;
+
+  const _CastPlaybackInfo({
+    required this.url,
+    required this.title,
+    this.headers,
+    this.subtitleUrl,
+    this.subtitleLabel,
+  });
 }

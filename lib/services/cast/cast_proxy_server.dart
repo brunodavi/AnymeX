@@ -167,7 +167,15 @@ class CastProxyServer {
     final rangeHeader = request.headers.value('range');
 
     request.response.headers.set('Accept-Ranges', 'bytes');
-    request.response.headers.contentType = ContentType('video', 'mp4');
+    request.response.headers.contentType = _contentTypeForPath(resolvedPath);
+
+    // DLNA clients probe the virtual file with HEAD before browsing/playing.
+    if (request.method == 'HEAD') {
+      request.response.statusCode = HttpStatus.ok;
+      request.response.headers.contentLength = totalLength;
+      await request.response.close();
+      return;
+    }
 
     if (rangeHeader != null && rangeHeader.startsWith('bytes=')) {
       final range = rangeHeader.substring(6).split('-');
@@ -222,9 +230,25 @@ class CastProxyServer {
       }
     });
 
-    request.response.headers.contentType ??= ContentType('video', 'mp4');
+    // Never claim MP4 when the upstream source did not say so.
+    request.response.headers.contentType ??= ContentType('application', 'octet-stream');
+
+    if (request.method == 'HEAD') {
+      await request.response.close();
+      return;
+    }
 
     await clientResp.stream.pipe(request.response);
+  }
+
+  static ContentType _contentTypeForPath(String path) {
+    final lower = path.toLowerCase().split('?').first;
+    if (lower.endsWith('.mkv')) return ContentType('video', 'x-matroska');
+    if (lower.endsWith('.webm')) return ContentType('video', 'webm');
+    if (lower.endsWith('.mov')) return ContentType('video', 'quicktime');
+    if (lower.endsWith('.m4v')) return ContentType('video', 'x-m4v');
+    if (lower.endsWith('.mp4')) return ContentType('video', 'mp4');
+    return ContentType('application', 'octet-stream');
   }
 
   static Future<void> _serveHlsMaster(HttpRequest request) async {
@@ -407,6 +431,11 @@ class CastProxyServer {
         request.response.headers.set(key, value);
       }
     });
+
+    if (request.method == 'HEAD') {
+      await request.response.close();
+      return;
+    }
 
     await clientResp.stream.pipe(request.response);
   }
