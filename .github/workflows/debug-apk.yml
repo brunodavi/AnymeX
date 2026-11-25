@@ -1,0 +1,172 @@
+name: Build and Release AnymeX (Android Debug APK)
+
+# Builds ONLY the Android APKs in debug mode and replaces the Android assets
+# of an existing release. Release tag/name/body are preserved; only the
+# AnymeX-Android-*.apk assets are overwritten with the debug builds.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to update (leave empty to use the latest release)"
+        required: false
+        type: string
+
+env:
+  FLUTTER_VERSION: "3.41.6"
+
+permissions:
+  contents: write
+
+jobs:
+  build-android-debug:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve release tag
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.release_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG=$(gh release view --json tagName --jq .tagName)
+          fi
+          if [ -z "$TAG" ] || ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::Release '$TAG' not found. Provide a valid release_tag."
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Updating release: $TAG"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Cache Rust
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - uses: actions/setup-java@v3
+        with:
+          distribution: "adopt"
+          java-version: "17"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+
+      - name: Cache Gradle
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Cache CMake
+        uses: actions/cache@v3
+        with:
+          path: ~/cmake
+          key: cmake-3.18.1-linux-x64
+
+      - name: Setup Android
+        run: |
+          if [ ! -d "$HOME/cmake/cmake-3.18.1-Linux-x86_64" ]; then
+            mkdir -p $HOME/cmake && cd $HOME/cmake
+            wget -q https://github.com/Kitware/CMake/releases/download/v3.18.1/cmake-3.18.1-Linux-x86_64.tar.gz
+            tar -xzf cmake-3.18.1-Linux-x86_64.tar.gz
+          fi
+          cd $GITHUB_WORKSPACE
+          CMAKE_DIR="$HOME/cmake/cmake-3.18.1-Linux-x86_64"
+          echo "cmake.dir=$CMAKE_DIR" >> android/local.properties
+          # No key.properties is created: the debug build uses the standard
+          # Android debug keystore instead of the release signing key.
+
+      - name: Setup Environment
+        shell: bash
+        env:
+          AL_CLIENT_ID: ${{ secrets.AL_CLIENT_ID }}
+          AL_CLIENT_SECRET: ${{ secrets.AL_CLIENT_SECRET }}
+          SIMKL_CLIENT_ID: ${{ secrets.SIMKL_CLIENT_ID }}
+          SIMKL_CLIENT_SECRET: ${{ secrets.SIMKL_CLIENT_SECRET }}
+          MAL_CLIENT_ID: ${{ secrets.MAL_CLIENT_ID }}
+          MAL_CLIENT_SECRET: ${{ secrets.MAL_CLIENT_SECRET }}
+          CALLBACK_SCHEME: ${{ secrets.CALLBACK_SCHEME }}
+          GOOGLE_BOOKS_API_KEY: ${{ secrets.GOOGLE_BOOKS_API_KEY }}
+          GIT_CLIENT_ID: ${{ secrets.GIT_CLIENT_ID }}
+          GIT_CLIENT_SECRET: ${{ secrets.GIT_CLIENT_SECRET }}
+          GIT_CALLBACK_SCHEME: ${{ secrets.GIT_CALLBACK_SCHEME }}
+          COMMENTS_BASE_URL: ${{ secrets.COMMENTS_BASE_URL }}
+          BOT_BASE_URL: ${{ secrets.BOT_BASE_URL }}
+          BOT_API_SECRET: ${{ secrets.BOT_API_SECRET }}
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          WATCHIUM_SERVER_URL: ${{ secrets.WATCHIUM_SERVER_URL }}
+          WATCHIUM_API_TOKEN: ${{ secrets.WATCHIUM_API_TOKEN }}
+        run: |
+          cat > .env << EOF
+          AL_CLIENT_ID=$AL_CLIENT_ID
+          AL_CLIENT_SECRET=$AL_CLIENT_SECRET
+          SIMKL_CLIENT_ID=$SIMKL_CLIENT_ID
+          SIMKL_CLIENT_SECRET=$SIMKL_CLIENT_SECRET
+          MAL_CLIENT_ID=$MAL_CLIENT_ID
+          MAL_CLIENT_SECRET=$MAL_CLIENT_SECRET
+          CALLBACK_SCHEME=$CALLBACK_SCHEME
+          GOOGLE_BOOKS_API_KEY=$GOOGLE_BOOKS_API_KEY
+          GIT_CLIENT_ID=$GIT_CLIENT_ID
+          GIT_CLIENT_SECRET=$GIT_CLIENT_SECRET
+          GIT_CALLBACK_SCHEME=$GIT_CALLBACK_SCHEME
+          COMMENTS_BASE_URL=$COMMENTS_BASE_URL
+          BOT_BASE_URL=$BOT_BASE_URL
+          BOT_API_SECRET=$BOT_API_SECRET
+          TMDB_API_KEY=$TMDB_API_KEY
+          WATCHIUM_SERVER_URL=$WATCHIUM_SERVER_URL
+          WATCHIUM_API_TOKEN=$WATCHIUM_API_TOKEN
+          EOF
+
+      - name: Build Android Debug APKs
+        run: |
+          flutter pub get
+          flutter build apk --debug --split-per-abi
+          flutter build apk --debug
+          cd build/app/outputs/flutter-apk
+          mv app-armeabi-v7a-debug.apk AnymeX-Android-armeabi-v7a.apk
+          mv app-arm64-v8a-debug.apk AnymeX-Android-arm64-v8a.apk
+          mv app-x86_64-debug.apk AnymeX-Android-x86_64.apk
+          mv app-debug.apk AnymeX-Android-universal.apk
+          ls -lh AnymeX-Android-*.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-debug-all
+          path: build/app/outputs/flutter-apk/AnymeX-Android-*.apk
+
+      - name: Update release assets (debug APKs, same asset names)
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.release.outputs.tag }}
+          artifacts: build/app/outputs/flutter-apk/AnymeX-Android-*.apk
+          allowUpdates: true
+          replacesArtifacts: true
+          removeArtifacts: false
+          omitBodyDuringUpdate: true
+          omitNameDuringUpdate: true
+          omitDraftDuringUpdate: true
+          omitPrereleaseDuringUpdate: true
+          token: ${{ secrets.GITHUB_TOKEN }}
