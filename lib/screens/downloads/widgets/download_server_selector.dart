@@ -208,6 +208,8 @@ class _DownloadServerSelectorState extends State<DownloadServerSelector> {
           widget.episodes.length == 1 ? selectedVideo?.headers : null,
       firstEpisodeSubtitles:
           widget.episodes.length == 1 ? selectedVideo?.subtitles : null,
+      firstEpisodeAudios:
+          widget.episodes.length == 1 ? selectedVideo?.audios : null,
       isFromMetadataPage: widget.isFromMetadataPage,
     );
     snackBar(

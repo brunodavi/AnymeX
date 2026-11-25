@@ -843,6 +843,7 @@ class DownloadController extends GetxController {
     String? firstEpisodeVideoUrl,
     Map<String, String>? firstEpisodeHeaders,
     List<hive.Track>? firstEpisodeSubtitles,
+    List<hive.Track>? firstEpisodeAudios,
     bool isFromMetadataPage = true,
   }) async {
     final mediaTitle = media.name ?? 'Unknown';
@@ -910,6 +911,7 @@ class DownloadController extends GetxController {
       status: DownloadStatus.queued,
       videoHeaders: videoHeaders,
       subtitles: videoSubtitles,
+      audios: firstEpisodeAudios,
       media: media,
     );
 
@@ -1030,7 +1032,10 @@ class DownloadController extends GetxController {
         task.videoHeaders ??= {};
         task.videoHeaders!.addAll(chosenVideo.headers ?? {});
         task.subtitles ??= chosenVideo.subtitles;
-        task.audios ??= chosenVideo.audios;
+        // Sobrescreve mesmo quando veio [] de um task salvo em JSON.
+        if (chosenVideo.audios != null && chosenVideo.audios!.isNotEmpty) {
+          task.audios = chosenVideo.audios;
+        }
       }
 
       if (task.videoUrl.isEmpty) {
