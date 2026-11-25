@@ -268,11 +268,11 @@ class LocalDlnaServer {
 
   String _header(String message, String name) {
     final match = RegExp(
-      '^$name:\\s*(.*)$',
+      '^${name}:\\s*(.*)\$',
       caseSensitive: false,
       multiLine: true,
     ).firstMatch(message);
-    return match?.group(1)?.trim();
+    return match?.group(1)?.trim() ?? '';
   }
 
   void _sendSearchResponse(InternetAddress address, int port, String target) {
