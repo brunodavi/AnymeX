@@ -7,6 +7,13 @@ import 'package:http/http.dart' as http;
 
 import 'cast_proxy_server.dart';
 
+class _ProbeResult {
+  final String mime;
+  final int? size;
+
+  const _ProbeResult(this.mime, this.size);
+}
+
 /// The currently playing source as exposed by the local DLNA server.
 class LocalDlnaSource {
   final String url;
@@ -14,6 +21,8 @@ class LocalDlnaSource {
   final String title;
   final String? subtitleUrl;
   final String mimeType;
+  final int? sizeBytes;
+  final Duration? duration;
 
   const LocalDlnaSource({
     required this.url,
@@ -21,27 +30,39 @@ class LocalDlnaSource {
     required this.mimeType,
     this.headers,
     this.subtitleUrl,
+    this.sizeBytes,
+    this.duration,
   });
 
-  /// Detects the real MIME type without downloading the media.
+  /// DIDL-Lite `res@bitrate` is specified in **bytes per second**.
+  int? get bitrateBytesPerSecond {
+    final size = sizeBytes;
+    final seconds = duration?.inSeconds ?? 0;
+    if (size == null || size <= 0 || seconds <= 0) return null;
+    return (size / seconds).round();
+  }
+
+  /// Detects the real MIME type and size without downloading the media.
   ///
-  /// The extension is trusted first. When there is no useful extension we do
-  /// a single HTTP HEAD (with the original playback headers) and fall back to
-  /// `application/octet-stream` so we never advertise a format we did not
-  /// confirm.
+  /// Extension first, then one HEAD, then at most 512 bytes of a ranged GET
+  /// for container magic (`ftyp`, EBML, `#EXTM3U`). Unknown content is
+  /// advertised as `application/octet-stream`, never as a false MP4.
   static Future<LocalDlnaSource> fromPlayback({
     required String url,
     required String title,
     Map<String, String>? headers,
     String? subtitleUrl,
+    Duration? duration,
   }) async {
-    final mime = await detectMimeType(url, headers);
+    final probe = await probeSource(url, headers);
     return LocalDlnaSource(
       url: url,
       title: title,
       headers: headers,
       subtitleUrl: subtitleUrl,
-      mimeType: mime,
+      mimeType: probe.mime,
+      sizeBytes: probe.size,
+      duration: duration != null && duration.inSeconds > 0 ? duration : null,
     );
   }
 
@@ -49,29 +70,105 @@ class LocalDlnaSource {
     String url,
     Map<String, String>? headers,
   ) async {
-    final clean = url.split('?').first.toLowerCase();
-    if (clean.endsWith('.m3u8')) return 'application/vnd.apple.mpegurl';
-    if (clean.endsWith('.mpd')) return 'application/dash+xml';
+    final probe = await probeSource(url, headers);
+    return probe.mime;
+  }
 
-    final byExtension = _mimeFromPath(clean);
-    if (byExtension != null) return byExtension;
-    if (url.startsWith('/') || url.startsWith('file://')) {
-      return 'application/octet-stream';
+  static Future<_ProbeResult> probeSource(
+    String url,
+    Map<String, String>? headers,
+  ) async {
+    final clean = url.split('?').first.toLowerCase();
+    if (clean.endsWith('.m3u8')) {
+      return const _ProbeResult('application/vnd.apple.mpegurl', null);
+    }
+    if (clean.endsWith('.mpd')) {
+      return const _ProbeResult('application/dash+xml', null);
     }
 
+    final byExtension = _mimeFromPath(clean);
+    if (byExtension != null) return _ProbeResult(byExtension, null);
+
+    if (url.startsWith('/') || url.startsWith('file://')) {
+      final path = url.startsWith('file://')
+          ? Uri.parse(url).toFilePath()
+          : url;
+      int? size;
+      List<int> sniffed = const <int>[];
+      try {
+        final file = File(path);
+        size = await file.length();
+        final raf = await file.open();
+        try {
+          sniffed = await raf.read(512);
+        } finally {
+          await raf.close();
+        }
+      } catch (_) {}
+      return _ProbeResult(_sniffMime(sniffed) ?? 'application/octet-stream', size);
+    }
+
+    int? size;
+    String? contentType;
     try {
       final request = http.Request('HEAD', Uri.parse(url));
       if (headers != null) request.headers.addAll(headers);
       final response = await request
           .send()
           .timeout(const Duration(seconds: 3));
-      final contentType = response.headers['content-type'];
-      if (contentType != null && contentType.trim().isNotEmpty) {
-        return contentType.split(';').first.trim().toLowerCase();
+      final value = response.headers['content-type'];
+      if (value != null && value.trim().isNotEmpty) {
+        contentType = value.split(';').first.trim().toLowerCase();
+      }
+      final length = response.headers['content-length'];
+      if (length != null) size = int.tryParse(length);
+    } catch (_) {}
+
+    if (contentType != null &&
+        contentType != 'application/octet-stream' &&
+        contentType.startsWith('video/')) {
+      return _ProbeResult(contentType, size);
+    }
+
+    // Some anime hosts return a generic content type. Sniff the container
+    // with a tiny ranged GET; the stream is cancelled after 512 bytes.
+    try {
+      final client = http.Client();
+      try {
+        final request = http.Request('GET', Uri.parse(url));
+        if (headers != null) request.headers.addAll(headers);
+        request.headers['Range'] = 'bytes=0-511';
+        final response = await client
+            .send(request)
+            .timeout(const Duration(seconds: 4));
+        final bytes = <int>[];
+        await for (final chunk in response.stream) {
+          bytes.addAll(chunk);
+          if (bytes.length >= 512) break;
+        }
+        final sniffed = _sniffMime(bytes);
+        if (sniffed != null) return _ProbeResult(sniffed, size);
+      } finally {
+        client.close();
       }
     } catch (_) {}
 
-    return 'application/octet-stream';
+    return _ProbeResult(contentType ?? 'application/octet-stream', size);
+  }
+
+  static String? _sniffMime(List<int> b) {
+    if (b.length >= 8 &&
+        b[4] == 0x66 && b[5] == 0x74 && b[6] == 0x79 && b[7] == 0x70) {
+      return 'video/mp4'; // ISO BMFF `ftyp` box.
+    }
+    if (b.length >= 4 &&
+        b[0] == 0x1A && b[1] == 0x45 && b[2] == 0xDF && b[3] == 0xA3) {
+      return 'video/x-matroska'; // EBML header.
+    }
+    final text = String.fromCharCodes(b.take(32));
+    if (text.startsWith('#EXTM3U')) return 'application/vnd.apple.mpegurl';
+    if (text.contains('<MPD')) return 'application/dash+xml';
+    return null;
   }
 
   static String? _mimeFromPath(String lowerPath) {
@@ -489,6 +586,30 @@ class LocalDlnaServer {
     final mime = source?.mimeType ?? 'application/octet-stream';
     final title = _escape(source?.title ?? 'AnymeX Video');
 
+    // Roku builds its Video node stream qualities from res@bitrate (bytes/s).
+    // Without it the player reports error -5 "no valid bitrates".
+    final size = source?.sizeBytes;
+    final duration = source?.duration;
+    final bitrate = source?.bitrateBytesPerSecond;
+    final sizeAttr = size != null && size > 0 ? ' size="$size"' : '';
+    final durationAttr = duration != null && duration.inSeconds > 0
+        ? ' duration="${_didlDuration(duration)}"'
+        : '';
+    final bitrateAttr = bitrate != null && bitrate > 0
+        ? ' bitrate="$bitrate"'
+        : '';
+    final resAttrs = '$sizeAttr$durationAttr$bitrateAttr';
+
+    // Offer both a DLNA-tagged resource and a plain UPnP one pointing to the
+    // exact same proxy URL. Both describe the detected MIME truthfully.
+    final dlnaRes = (mime.startsWith('video/'))
+        ? '<res protocolInfo="http-get:*:$mime:'
+          'DLNA.ORG_CI=0;DLNA.ORG_OP=01"$resAttrs>'
+          '${_escape(mediaUrl)}</res>'
+        : '';
+    final plainRes = '<res protocolInfo="http-get:*:$mime:*"$resAttrs>'
+        '${_escape(mediaUrl)}</res>';
+
     final caption = CastProxyServer.currentSubtitleUrl == null
         ? ''
         : '<sec:CaptionInfoEx xmlns:sec="http://www.sec.co.kr/" '
@@ -498,7 +619,7 @@ class LocalDlnaServer {
     final item = '<item id="video" parentID="videos" restricted="1">'
         '<dc:title>$title</dc:title>'
         '<upnp:class>object.item.videoItem</upnp:class>'
-        '<res protocolInfo="http-get:*:$mime:*">${_escape(mediaUrl)}</res>'
+        '$dlnaRes$plainRes'
         '$caption'
         '</item>';
 
@@ -652,6 +773,13 @@ class LocalDlnaServer {
       '<dataType>string</dataType></stateVariable>'
       '</serviceStateTable>'
       '</scpd>';
+
+  String _didlDuration(Duration d) {
+    final hours = d.inHours;
+    final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$hours:$minutes:$seconds';
+  }
 
   String _escape(String value) => value
       .replaceAll('&', '&amp;')

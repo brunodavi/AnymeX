@@ -44,6 +44,7 @@ class _CastDevicePaneState extends State<CastDevicePane> {
         headers: info.headers,
         subtitleUrl: info.subtitleUrl,
         title: info.title,
+        duration: widget.controller.episodeDuration.value,
       );
       await localDlna.updateSource(source);
     });
@@ -346,6 +347,7 @@ class _CastDevicePaneState extends State<CastDevicePane> {
       headers: info.headers,
       subtitleUrl: info.subtitleUrl,
       title: info.title,
+      duration: widget.controller.episodeDuration.value,
     );
     final started = await localDlna.start(source);
     if (!started) {

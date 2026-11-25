@@ -24,9 +24,13 @@ sem exigir que a TV atue como DLNA Renderer e sem alterar o Cast existente.
    `upnp:rootdevice`, o UUID, `MediaServer:1`, `ContentDirectory:1` e
    `ConnectionManager:1` em `239.255.255.250:1900`.
 6. O `Browse` retorna DIDL-Lite com um container `Videos` e um item cujo `<res>`
-   aponta para a URL do proxy. O MIME type vem da extensão ou de um único
-   `HEAD` na fonte original — formatos desconhecidos são anunciados como
-   `application/octet-stream` (nunca como MP4 falso).
+   aponta para a URL do proxy. O MIME type vem da extensão, de um `HEAD` ou
+   de no máximo 512 bytes de um `GET` com `Range` (magic bytes `ftyp`/EBML).
+   O `<res>` também inclui `size`, `duration` e `bitrate` (bytes/segundo),
+   calculados a partir do `Content-Length` real e da duração do episódio.
+   São oferecidas duas variantes: `DLNA.ORG_CI=0;DLNA.ORG_OP=01` e a forma
+   UPnP simples, apontando para a mesma URL. Formatos desconhecidos são
+   anunciados como `application/octet-stream` (nunca como MP4 falso).
 7. Ao trocar de episódio/faixa, o painel chama `updateSource()` e reanuncia o
    servidor, atualizando a URL virtual.
 
@@ -78,6 +82,16 @@ descoberta SSDP acontece na abertura da lista de fontes). O servidor reenvia
 A reprodução automática via DLNA não é parte do protótipo: o Roku Media Player
 sempre inicia a reprodução pelo usuário. A ECP do Roku (`launch/15985`) usada
 pelo Cast atual continua disponível para os dispositivos já descobertos.
+
+### Erro `no valid bitrates` (-5)
+
+O Roku encontra e lista o servidor, mas ao iniciar informa `no valid bitrates`
+quando não consegue montar as *stream qualities* do `Video` node. Isso é um
+detalhe de metadados do `res`, não de descoberta SSDP nem necessariamente do
+container do arquivo. A correção acima envia `bitrate`, `size` e `duration`
+reais e duas variantes de `protocolInfo`. Se a fonte for HLS, o erro também
+pode ocorrer quando o manifesto mestre não traz `BANDWIDTH` válido nos
+`#EXT-X-STREAM-INF`; nesse caso teste primeiro um episódio MP4/MKV progressivo.
 
 ## Limitações conhecidas
 
