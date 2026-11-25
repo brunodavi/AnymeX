@@ -476,6 +476,13 @@ abstract final class SettingsRegistry {
           searchTags: ['fade', 'controls'],
         ),
         SettingItem(
+          title: 'DoubleTap to Pause',
+          category: 'Video Player',
+          section: 'Common',
+          icon: Icons.touch_app_rounded,
+          searchTags: ['double click', 'play', 'pause'],
+        ),
+        SettingItem(
           title: 'DoubleTap to Seek',
           category: 'Video Player',
           section: 'Common',

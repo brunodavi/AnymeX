@@ -1218,6 +1218,14 @@ class _SettingsPlayerControlsState extends State<SettingsPlayerControls> {
                 value: settings.enableSlideToSeek,
                 onChanged: (val) => settings.enableSlideToSeek = val,
               ),
+              AnymeXTile.toggle(
+                icon: Icons.touch_app_rounded,
+                title: 'DoubleTap to Pause',
+                subtitle:
+                    'Double tap anywhere on the player to play/pause instead of seeking',
+                value: settings.doubleTapToPause,
+                onChanged: (val) => settings.doubleTapToPause = val,
+              ),
               AnymeXTile.slider(
                 value: settings.seekDuration.toDouble(),
                 max: 50,

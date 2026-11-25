@@ -37,8 +37,10 @@ class _DoubleTapSeekWidgetState extends State<DoubleTapSeekWidget>
   Timer? _setRateDebounceTimer;
   Timer? _leftTapTimer;
   Timer? _rightTapTimer;
+  Timer? _singleTapTimer;
   int _lastLeftTapTime = 0;
   int _lastRightTapTime = 0;
+  int _lastGlobalTapTime = 0;
 
   static const Duration _seekModeTimeout = Duration(milliseconds: 1500);
   static const Duration _indicatorTimeout = Duration(milliseconds: 1000);
@@ -112,6 +114,7 @@ class _DoubleTapSeekWidgetState extends State<DoubleTapSeekWidget>
     _setRateDebounceTimer?.cancel();
     _leftTapTimer?.cancel();
     _rightTapTimer?.cancel();
+    _singleTapTimer?.cancel();
     _speedAnimationController.dispose();
     _glowAnimationController.dispose();
     _playerFocusNode.dispose();
@@ -754,9 +757,50 @@ class _DoubleTapSeekWidgetState extends State<DoubleTapSeekWidget>
   void _cancelAllTapTimers() {
     _leftTapTimer?.cancel();
     _rightTapTimer?.cancel();
+    _singleTapTimer?.cancel();
+  }
+
+  void _commitSingleTap() {
+    _cancelAllTapTimers();
+    _refocusPlayerForShortcuts();
+    widget.controller.toggleControls();
+  }
+
+  /// Consumes taps when "double tap to pause" is enabled. The single tap is
+  /// delayed briefly so the second tap can cancel it instead of toggling the
+  /// controls. Returns true when the tap was handled here.
+  bool _consumeDoubleTapPause() {
+    if (!Get.find<Settings>().doubleTapToPause) {
+      _lastGlobalTapTime = 0;
+      _singleTapTimer?.cancel();
+      return false;
+    }
+
+    _singleTapTimer?.cancel();
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final isDoubleTap =
+        _lastGlobalTapTime != 0 && now - _lastGlobalTapTime < 250;
+    _lastGlobalTapTime = isDoubleTap ? 0 : now;
+
+    if (isDoubleTap) {
+      if (!widget.controller.isLocked.value && !_isFollowMode()) {
+        HapticFeedback.lightImpact();
+        widget.controller.togglePlayPause();
+      }
+    } else {
+      _singleTapTimer = Timer(const Duration(milliseconds: 260), () {
+        if (mounted) {
+          _lastGlobalTapTime = 0;
+          _commitSingleTap();
+        }
+      });
+    }
+    return true;
   }
 
   void _onLeftTap() {
+    if (_consumeDoubleTapPause()) return;
     if (widget.controller.playerSettings.seekDuration == 0) {
       _handleSingleTap();
       return;
@@ -771,6 +815,7 @@ class _DoubleTapSeekWidgetState extends State<DoubleTapSeekWidget>
   }
 
   void _onRightTap() {
+    if (_consumeDoubleTapPause()) return;
     if (widget.controller.playerSettings.seekDuration == 0) {
       _handleSingleTap();
       return;
@@ -785,13 +830,8 @@ class _DoubleTapSeekWidgetState extends State<DoubleTapSeekWidget>
   }
 
   void _handleSingleTap() {
-    _cancelAllTapTimers();
-    _refocusPlayerForShortcuts();
-    if (widget.controller.isLocked.value) {
-      widget.controller.toggleControls();
-      return;
-    }
-    widget.controller.toggleControls();
+    if (_consumeDoubleTapPause()) return;
+    _commitSingleTap();
   }
 
   KeyEventResult _handleKeyboard(FocusNode node, KeyEvent event) {

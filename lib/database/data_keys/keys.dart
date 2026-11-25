@@ -282,6 +282,7 @@ enum PlayerSettingsKeys {
   enableHoldToSeek,
   enableSlideToSeek,
   useMediaSession,
+  doubleTapToPause,
 }
 
 enum UISettingsKeys {

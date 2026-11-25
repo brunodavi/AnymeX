@@ -73,6 +73,7 @@ String settingsLabel(AppLocalizations l10n, String english) => switch (english) 
     'Enable Swipe Controls' => l10n.enableSwipeControls,
     'Save Last Frame' => l10n.saveLastFrame,
     'Animate Control Overlay' => l10n.animateControlOverlay,
+    'DoubleTap to Pause' => l10n.doubleTapToPause,
     'DoubleTap to Seek' => l10n.doubletapToSeek,
     'MegaSkip Duration' => l10n.megaskipDuration,
     'Mark As Watched' => l10n.markAsWatched,

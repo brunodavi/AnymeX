@@ -39,6 +39,7 @@ class PlayerSettings {
   bool enableHoldToSeek;
   bool enableSlideToSeek;
   bool useMediaSession;
+  bool doubleTapToPause;
 
   PlayerSettings({
     this.speed = 1.0,
@@ -79,6 +80,7 @@ class PlayerSettings {
     this.enableHoldToSeek = true,
     this.enableSlideToSeek = true,
     this.useMediaSession = false,
+    this.doubleTapToPause = false,
   });
 
   factory PlayerSettings.fromDB() {
@@ -163,6 +165,8 @@ class PlayerSettings {
           .get<bool>(defaults.enableSlideToSeek),
       useMediaSession: PlayerSettingsKeys.useMediaSession
           .get<bool>(defaults.useMediaSession),
+      doubleTapToPause: PlayerSettingsKeys.doubleTapToPause
+          .get<bool>(defaults.doubleTapToPause),
     );
   }
 }
