@@ -510,6 +510,21 @@ class DownloadController extends GetxController {
             } else if (statusStr == 'completed') {
               task.status = DownloadStatus.completed;
               task.filePath = payload['filePath'] as String?;
+              if (payload['tracksMuxed'] == true) {
+                task.subtitles = null;
+                task.audios = null;
+              } else {
+                if (payload['subtitles'] != null) {
+                  task.subtitles = (payload['subtitles'] as List<dynamic>)
+                      .map((e) => hive.Track.fromJson(e as Map<String, dynamic>))
+                      .toList();
+                }
+                if (payload['audios'] != null) {
+                  task.audios = (payload['audios'] as List<dynamic>)
+                      .map((e) => hive.Track.fromJson(e as Map<String, dynamic>))
+                      .toList();
+                }
+              }
               _clearSpeed(taskId);
             } else if (statusStr == 'failed') {
               task.status = DownloadStatus.failed;
@@ -599,11 +614,13 @@ class DownloadController extends GetxController {
   }
 
   Future<void> _onForegroundTaskFinished(ActiveDownloadTask task) async {
-    final fileName = MediaDownloader.buildFileName(
-      episodeNumber: task.episode.number,
-      sortMap: task.episode.sortMap,
-      url: task.videoUrl,
-    );
+    final fileName = task.filePath != null && task.filePath!.isNotEmpty
+        ? p.basename(task.filePath!)
+        : MediaDownloader.buildFileName(
+            episodeNumber: task.episode.number,
+            sortMap: task.episode.sortMap,
+            url: task.videoUrl,
+          );
     await _writeEpisodeMeta(task, fileName);
     await _loadIndex();
     _notifyDownloadComplete(
@@ -1013,6 +1030,7 @@ class DownloadController extends GetxController {
         task.videoHeaders ??= {};
         task.videoHeaders!.addAll(chosenVideo.headers ?? {});
         task.subtitles ??= chosenVideo.subtitles;
+        task.audios ??= chosenVideo.audios;
       }
 
       if (task.videoUrl.isEmpty) {
@@ -1048,7 +1066,7 @@ class DownloadController extends GetxController {
       _updateNotification();
 
       final isHls = linkType == VideoLinkType.hls;
-      final fileName = MediaDownloader.buildFileName(
+      var fileName = MediaDownloader.buildFileName(
         episodeNumber: task.episode.number,
         sortMap: task.episode.sortMap,
         url: task.videoUrl,
@@ -1076,6 +1094,7 @@ class DownloadController extends GetxController {
                 )
               ],
         subtitles: task.subtitles,
+        audios: task.audios,
         subDownloadDir: fullDirPath,
         m3u8Url: isHls ? task.videoUrl : null,
         videoFileName: fileName,
@@ -1098,7 +1117,7 @@ class DownloadController extends GetxController {
 
       _activeFileTasks.add(task.taskId);
 
-      await mDownloader.download((progress) {
+      final downloadResult = await mDownloader.download((progress) {
         task.progress = progress.completed / progress.total;
         task.status = DownloadStatus.downloading;
         _updateSpeed(task.taskId, task.progress,
@@ -1113,10 +1132,20 @@ class DownloadController extends GetxController {
         }
       });
 
+      fileName = p.basename(downloadResult.filePath);
+      if (downloadResult.tracksMuxed) {
+        // Faixas embutidas no MKV: evita duplicatas no seletor do player.
+        task.subtitles = null;
+        task.audios = null;
+      } else {
+        // Fallback: mantem audio/legendas como faixas externas.
+        task.audios = downloadResult.audioTracks ?? <hive.Track>[];
+      }
+
       _clearSpeed(task.taskId);
       _lastProgressUpdate.remove(task.taskId);
       task.status = DownloadStatus.completed;
-      task.filePath = p.join(fullDirPath, fileName);
+      task.filePath = downloadResult.filePath;
       task.progress = 1.0;
       await _onTaskFinished(task, fileName);
 
@@ -1681,6 +1710,7 @@ class DownloadController extends GetxController {
           filePath: task.filePath ?? '',
           quality: task.videoQuality,
           subtitles: task.subtitles,
+          audios: task.audios,
         ),
       ];
       updatedEps.sort((a, b) {
@@ -2102,6 +2132,7 @@ class DownloadController extends GetxController {
               filePath: newFilePath,
               quality: ep.quality,
               subtitles: ep.subtitles,
+              audios: ep.audios,
             ));
           }
         }
@@ -2388,6 +2419,7 @@ class DownloadController extends GetxController {
                   filePath: epFilePath,
                   quality: epMeta.quality,
                   subtitles: epMeta.subtitles,
+                  audios: epMeta.audios,
                 ));
           if (epMeta.fileName.isNotEmpty) {
             existingFileNames.add(epMeta.fileName);
@@ -2883,6 +2915,7 @@ class DownloadController extends GetxController {
       ActiveDownloadTask task, hive.Video selectedVideo) async {
     task.videoUrl = selectedVideo.url ?? selectedVideo.originalUrl ?? '';
     task.videoHeaders = selectedVideo.headers ?? {};
+    task.audios = selectedVideo.audios;
     task.status = DownloadStatus.queued;
 
     if (selectedVideo.subtitles != null &&

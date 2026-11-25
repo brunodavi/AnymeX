@@ -162,6 +162,7 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     required List<Episode> episodeList,
     required anymex.Media anilistData,
     List<model.Track>? subtitles,
+    List<model.Track>? audios,
   }) {
     final offlineVideo = model.Video(
       url: videoPath,
@@ -170,6 +171,7 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
       headerKeys: [],
       headerValues: [],
       subtitles: subtitles,
+      audios: audios,
     );
 
     return PlayerController(

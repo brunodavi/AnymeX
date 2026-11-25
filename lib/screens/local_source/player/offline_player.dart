@@ -72,6 +72,7 @@ class _OfflineWatchPageState extends State<OfflineWatchPage> {
         currentIndex >= 0 ? (currentIndex + 1).toString() : '1';
 
     List<hive.Track>? offlineSubtitles;
+    List<hive.Track>? offlineAudios;
     try {
       final parentDir = File(widget.episode.path).parent;
       final metaFile = File(p.join(parentDir.path, 'metadata.json'));
@@ -83,6 +84,7 @@ class _OfflineWatchPageState extends State<OfflineWatchPage> {
             e.filePath == widget.episode.path ||
             e.fileName == p.basename(widget.episode.path));
         offlineSubtitles = epMeta?.subtitles;
+        offlineAudios = epMeta?.audios;
       }
     } catch (e) {
       debugPrint('Failed to read metadata for subtitles: $e');
@@ -93,6 +95,7 @@ class _OfflineWatchPageState extends State<OfflineWatchPage> {
         itemName: widget.episode.name,
         videoPath: widget.episode.path,
         subtitles: offlineSubtitles,
+        audios: offlineAudios,
         episode: Episode(
           number: currentEpisodeNumber,
           title: widget.episode.name,

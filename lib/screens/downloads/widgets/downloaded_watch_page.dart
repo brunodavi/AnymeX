@@ -108,6 +108,7 @@ class _DownloadedWatchPageState extends State<DownloadedWatchPage> {
       anilistData: anymex.Media(serviceType: ServicesType.simkl)
         ..title = widget.summary.title,
       subtitles: epMeta.subtitles,
+      audios: epMeta.audios,
     ));
   }
 

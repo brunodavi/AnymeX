@@ -130,6 +130,10 @@ class BackgroundDownloadTaskHandler extends TaskHandler {
     final subtitles = subtitlesRaw
         ?.map((e) => hive.Track.fromJson(e as Map<String, dynamic>))
         .toList();
+    final audiosRaw = task['audios'] as List<dynamic>?;
+    final audios = audiosRaw
+        ?.map((e) => hive.Track.fromJson(e as Map<String, dynamic>))
+        .toList();
 
     final headers = headersraw?.map((k, v) => MapEntry(k, v.toString()));
 
@@ -152,10 +156,11 @@ class BackgroundDownloadTaskHandler extends TaskHandler {
       concurrentDownloads: parallelSegments,
       episodeNumber: episodeNumber,
       subtitles: subtitles,
+      audios: audios,
     );
 
     try {
-      await mDownloader.download((prog) {
+      final downloadResult = await mDownloader.download((prog) {
         _hlsProgress = prog.completed / prog.total;
         FlutterForegroundTask.updateService(
           notificationTitle: 'Downloading Anime',
@@ -179,7 +184,14 @@ class BackgroundDownloadTaskHandler extends TaskHandler {
         'taskId': taskId,
         'status': 'completed',
         'progress': 1.0,
-        'filePath': p.join(fullDirPath, fileName),
+        'filePath': downloadResult.filePath,
+        if (downloadResult.tracksMuxed) 'tracksMuxed': true,
+        if (!downloadResult.tracksMuxed) ...{
+          'subtitles': subtitles?.map((e) => e.toJson()).toList() ?? [],
+          'audios': (downloadResult.audioTracks ?? audios ?? [])
+              .map((e) => e.toJson())
+              .toList(),
+        },
       };
       _completedResults[taskId] = msg;
       _uiSendPort?.send(jsonEncode(msg));

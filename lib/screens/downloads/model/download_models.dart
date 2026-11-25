@@ -48,6 +48,7 @@ class ActiveDownloadTask {
   String? filePath;
   String? errorMessage;
   List<t.Track>? subtitles;
+  List<t.Track>? audios;
   List<hive.Video>? availableServers;
   OfflineMedia? media;
 
@@ -65,6 +66,7 @@ class ActiveDownloadTask {
     this.filePath,
     this.errorMessage,
     this.subtitles,
+    this.audios,
     this.availableServers,
     this.media,
   });
@@ -83,6 +85,7 @@ class ActiveDownloadTask {
         'filePath': filePath,
         'errorMessage': errorMessage,
         'subtitles': subtitles?.map((t) => t.toJson()).toList(),
+        'audios': audios?.map((t) => t.toJson()).toList(),
         if (media != null) 'media': media!.toJson(),
       };
 
@@ -104,6 +107,9 @@ class ActiveDownloadTask {
         subtitles: (json['subtitles'] as List<dynamic>?)
             ?.map((e) => t.Track.fromJson(e as Map<String, dynamic>))
             .toList(),
+        audios: (json['audios'] as List<dynamic>?)
+            ?.map((e) => t.Track.fromJson(e as Map<String, dynamic>))
+            .toList(),
         media: json['media'] != null
             ? OfflineMedia.fromJson(json['media'] as Map<String, dynamic>)
             : null,
@@ -123,6 +129,7 @@ class DownloadedEpisodeMeta {
   final String filePath;
   final String? quality;
   final List<t.Track>? subtitles;
+  final List<t.Track>? audios;
 
   const DownloadedEpisodeMeta({
     required this.episode,
@@ -131,6 +138,7 @@ class DownloadedEpisodeMeta {
     required this.filePath,
     this.quality,
     this.subtitles,
+    this.audios,
   });
 
   Map<String, dynamic> toJson() => {
@@ -140,6 +148,7 @@ class DownloadedEpisodeMeta {
         'filePath': filePath,
         'quality': quality,
         'subtitles': subtitles?.map((t) => t.toJson()).toList(),
+        'audios': audios?.map((t) => t.toJson()).toList(),
       };
 
   factory DownloadedEpisodeMeta.fromJson(Map<String, dynamic> json) =>
@@ -150,6 +159,9 @@ class DownloadedEpisodeMeta {
         filePath: json['filePath'] as String? ?? '',
         quality: json['quality'] as String?,
         subtitles: (json['subtitles'] as List<dynamic>?)
+            ?.map((e) => t.Track.fromJson(e as Map<String, dynamic>))
+            .toList(),
+        audios: (json['audios'] as List<dynamic>?)
             ?.map((e) => t.Track.fromJson(e as Map<String, dynamic>))
             .toList(),
       );

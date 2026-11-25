@@ -13,6 +13,11 @@ env:
 permissions:
   contents: write
 
+# Release fixa: nunca deixe dois runs alterando o mesmo tag "apk" ao mesmo tempo.
+concurrency:
+  group: anymex-apk-release
+  cancel-in-progress: false
+
 jobs:
   build-android:
     runs-on: ubuntu-latest
@@ -26,7 +31,7 @@ jobs:
           toolchain: stable
 
       - name: Cache Rust
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -38,9 +43,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
-      - uses: actions/setup-java@v3
+      - uses: actions/setup-java@v4
         with:
-          distribution: "adopt"
+          distribution: "temurin"
           java-version: "17"
 
       - uses: subosito/flutter-action@v2
@@ -49,17 +54,30 @@ jobs:
           cache: true
 
       - name: Cache Gradle
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties', 'pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-gradle-
 
+      # Estado incremental do Dart/CMake. A key exata muda a cada commit, mas o
+      # restore-keys reaproveita o estado do build anterior com o mesmo pubspec.lock.
+      - name: Cache build incremental (Dart/CMake)
+        uses: actions/cache@v4
+        with:
+          path: |
+            .dart_tool
+            build/app/.cxx
+            android/.gradle
+          key: ${{ runner.os }}-android-incremental-${{ hashFiles('pubspec.lock') }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-android-incremental-${{ hashFiles('pubspec.lock') }}-
+
       - name: Cache CMake
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/cmake
           key: cmake-3.18.1-linux-x64
@@ -141,19 +159,21 @@ jobs:
           name: android-test-release
           path: build/app/outputs/flutter-apk/AnymeX-Android-*.apk
 
+      # Release fixa: os assets são substituídos a cada build (mesmo nome de arquivo).
+      # softprops lida melhor com tag fixo; overwrite_files evita erro 422/já existe.
       - name: Publish APKs to the fixed release
-        uses: ncipollo/release-action@v1
+        uses: softprops/action-gh-release@v2
         with:
-          tag: apk
-          name: AnymeX APK
-          commit: ${{ github.sha }}
-          body: "Android release APKs signed with a public test key (not for production). Re-running this workflow replaces these assets."
-          artifacts: build/app/outputs/flutter-apk/AnymeX-Android-*.apk
-          allowUpdates: true
-          replacesArtifacts: true
-          removeArtifacts: false
-          omitBodyDuringUpdate: true
-          omitNameDuringUpdate: true
-          omitDraftDuringUpdate: true
-          omitPrereleaseDuringUpdate: true
           token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: apk
+          target_commitish: ${{ github.sha }}
+          name: "AnymeX APK (teste)"
+          prerelease: true
+          make_latest: false
+          overwrite_files: true
+          fail_on_unmatched_files: true
+          body: |
+            APKs Android assinados com a chave pública de teste (não usar em produção).
+            Commit: ${{ github.sha }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          files: build/app/outputs/flutter-apk/AnymeX-Android-*.apk
