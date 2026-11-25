@@ -4,6 +4,8 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:anymex_extension_runtime_bridge/Models/Source.dart';
 import 'package:ffmpeg_kit_flutter_new_min/ffmpeg_kit.dart';
+import 'package:ffmpeg_kit_flutter_new_min/ffprobe_kit.dart';
+import 'package:ffmpeg_kit_flutter_new_min/return_code.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
 import 'package:anymex/database/isar_models/track.dart' as hive;
@@ -519,9 +521,10 @@ class MediaDownloader {
     int embeddedAudioCount = 0;
     try {
       final probeSession = await FFprobeKit.getMediaInformation(videoTs);
-      final info = await probeSession.getMediaInformation();
-      embeddedAudioCount = info?.getStreams()
-              ?.where((stream) => stream.getType() == 'audio')
+      final info = probeSession.getMediaInformation();
+      embeddedAudioCount = info
+              ?.getStreams()
+              .where((stream) => stream.getType() == 'audio')
               .length ??
           0;
     } catch (e) {
