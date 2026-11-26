@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:anymex/screens/downloads/controller/download_controller.dart';
 import 'package:anymex/screens/downloads/model/download_models.dart';
 import 'package:anymex/database/isar_models/episode.dart';
+import 'package:anymex/database/isar_models/track.dart' as track_model;
 import 'package:anymex/database/isar_models/video.dart' as hive;
 import 'package:anymex/utils/language.dart';
 import 'package:anymex/utils/subtitle_translator.dart';
@@ -652,7 +653,7 @@ class _DownloadServerSelectorState extends State<DownloadServerSelector> {
     }
 
     final subtitleLabels = <String>[];
-    for (final sub in selected?.subtitles ?? <hive.Track>[]) {
+    for (final sub in selected?.subtitles ?? <track_model.Track>[]) {
       final label = sub.label?.trim();
       if (label != null && label.isNotEmpty && !subtitleLabels.contains(label)) {
         subtitleLabels.add(label);
