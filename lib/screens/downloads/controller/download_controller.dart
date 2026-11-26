@@ -859,6 +859,7 @@ class DownloadController extends GetxController {
     List<hive.Track>? firstEpisodeAudios,
     bool autoTranslateSubtitles = false,
     String? subtitleTranslateTo,
+    String? subtitleToTranslate,
     bool isFromMetadataPage = true,
   }) async {
     final mediaTitle = media.name ?? 'Unknown';
@@ -888,6 +889,7 @@ class DownloadController extends GetxController {
         videoAudios: i == 0 ? firstEpisodeAudios : null,
         autoTranslateSubtitles: autoTranslateSubtitles,
         subtitleTranslateTo: subtitleTranslateTo,
+        subtitleToTranslate: subtitleToTranslate,
         media: media,
       );
     }
@@ -905,6 +907,7 @@ class DownloadController extends GetxController {
     List<hive.Track>? videoAudios,
     bool autoTranslateSubtitles = false,
     String? subtitleTranslateTo,
+    String? subtitleToTranslate,
     required OfflineMedia media,
   }) {
     activeTasks.removeWhere((t) =>
@@ -935,6 +938,7 @@ class DownloadController extends GetxController {
       audios: videoAudios,
       autoTranslateSubtitles: autoTranslateSubtitles,
       subtitleTranslateTo: subtitleTranslateTo,
+      subtitleToTranslate: subtitleToTranslate,
       media: media,
     );
 
@@ -1131,6 +1135,7 @@ class DownloadController extends GetxController {
         episodeNumber: task.episode.number,
         autoTranslate: task.autoTranslateSubtitles,
         translateTo: task.subtitleTranslateTo,
+        translateSubtitleLabel: task.subtitleToTranslate,
       );
 
       final subFolder =

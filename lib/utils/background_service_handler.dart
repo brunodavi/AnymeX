@@ -136,6 +136,7 @@ class BackgroundDownloadTaskHandler extends TaskHandler {
         .toList();
     final autoTranslate = task['autoTranslateSubtitles'] as bool? ?? false;
     final translateTo = task['subtitleTranslateTo'] as String?;
+    final translateSubtitleLabel = task['subtitleToTranslate'] as String?;
 
     final headers = headersraw?.map((k, v) => MapEntry(k, v.toString()));
 
@@ -161,6 +162,7 @@ class BackgroundDownloadTaskHandler extends TaskHandler {
       audios: audios,
       autoTranslate: autoTranslate,
       translateTo: translateTo,
+      translateSubtitleLabel: translateSubtitleLabel,
     );
 
     try {

@@ -51,6 +51,10 @@ class ActiveDownloadTask {
   List<t.Track>? audios;
   bool autoTranslateSubtitles;
   String? subtitleTranslateTo;
+
+  /// Label da unica faixa de legenda que deve ser traduzida (quando o usuario
+  /// escolhe explicitamente uma no menu de traducao).
+  String? subtitleToTranslate;
   List<hive.Video>? availableServers;
   OfflineMedia? media;
 
@@ -71,6 +75,7 @@ class ActiveDownloadTask {
     this.audios,
     this.autoTranslateSubtitles = false,
     this.subtitleTranslateTo,
+    this.subtitleToTranslate,
     this.availableServers,
     this.media,
   });
@@ -92,6 +97,7 @@ class ActiveDownloadTask {
         'audios': audios?.map((t) => t.toJson()).toList(),
         'autoTranslateSubtitles': autoTranslateSubtitles,
         'subtitleTranslateTo': subtitleTranslateTo,
+        'subtitleToTranslate': subtitleToTranslate,
         if (media != null) 'media': media!.toJson(),
       };
 
@@ -119,6 +125,7 @@ class ActiveDownloadTask {
         autoTranslateSubtitles:
             json['autoTranslateSubtitles'] as bool? ?? false,
         subtitleTranslateTo: json['subtitleTranslateTo'] as String?,
+        subtitleToTranslate: json['subtitleToTranslate'] as String?,
         media: json['media'] != null
             ? OfflineMedia.fromJson(json['media'] as Map<String, dynamic>)
             : null,

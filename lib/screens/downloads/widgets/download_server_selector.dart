@@ -73,6 +73,7 @@ class _DownloadServerSelectorState extends State<DownloadServerSelector> {
   final _selectedQuality = RxnString();
   final _autoTranslate = false.obs;
   final _translateTo = 'pt-BR'.obs;
+  final _translateSubtitleLabel = RxnString();
   bool _isDisposed = false;
   String? _cancelToken;
   StreamSubscription? _streamSubscription;
@@ -203,6 +204,22 @@ class _DownloadServerSelectorState extends State<DownloadServerSelector> {
     if (!context.mounted) return;
     // Captura o texto antes do pop: depois disso o context pode estar inativo.
     final startedTitle = context.l10n.downloadStarted;
+
+    // Se o usuario trocou de servidor depois de escolher a legenda, usa a
+    // primeira disponivel do servidor final em vez de um label invalido.
+    final subtitleLabels = selectedVideo?.subtitles
+            ?.map((s) => s.label?.trim())
+            .where((label) => label != null && label.isNotEmpty)
+            .toList() ??
+        <String?>[];
+    String? subtitleToTranslate;
+    if (_autoTranslate.value && subtitleLabels.isNotEmpty) {
+      final chosen = _translateSubtitleLabel.value;
+      subtitleToTranslate = subtitleLabels.contains(chosen)
+          ? chosen
+          : subtitleLabels.first;
+    }
+
     Navigator.pop(context, true);
 
     await downloadController.enqueueDownloadBatch(
@@ -219,6 +236,7 @@ class _DownloadServerSelectorState extends State<DownloadServerSelector> {
           widget.episodes.length == 1 ? selectedVideo?.audios : null,
       autoTranslateSubtitles: _autoTranslate.value,
       subtitleTranslateTo: _autoTranslate.value ? _translateTo.value : null,
+      subtitleToTranslate: subtitleToTranslate,
       isFromMetadataPage: widget.isFromMetadataPage,
     );
     snackBar(
@@ -632,9 +650,15 @@ class _DownloadServerSelectorState extends State<DownloadServerSelector> {
         break;
       }
     }
-    if ((selected?.subtitles?.length ?? 0) == 0) {
-      return const SizedBox.shrink();
+
+    final subtitleLabels = <String>[];
+    for (final sub in selected?.subtitles ?? <hive.Track>[]) {
+      final label = sub.label?.trim();
+      if (label != null && label.isNotEmpty && !subtitleLabels.contains(label)) {
+        subtitleLabels.add(label);
+      }
     }
+    if (subtitleLabels.isEmpty) return const SizedBox.shrink();
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -644,10 +668,36 @@ class _DownloadServerSelectorState extends State<DownloadServerSelector> {
           Obx(() => AnymeXTile.toggle(
                 icon: HugeIcons.strokeRoundedTranslate,
                 title: context.l10n.autoTranslateSubtitles,
-                subtitle: 'Gera uma faixa traduzida e embute no download',
+                subtitle: 'Translate only the selected subtitle',
                 value: _autoTranslate.value,
-                onChanged: (value) => _autoTranslate.value = value,
+                onChanged: (value) {
+                  _autoTranslate.value = value;
+                  if (value &&
+                      !subtitleLabels.contains(_translateSubtitleLabel.value)) {
+                    _translateSubtitleLabel.value = subtitleLabels.first;
+                  }
+                },
               )),
+          Obx(() {
+            if (!_autoTranslate.value) return const SizedBox.shrink();
+            final currentLabel =
+                subtitleLabels.contains(_translateSubtitleLabel.value)
+                    ? _translateSubtitleLabel.value!
+                    : subtitleLabels.first;
+            return AnymeXTile(
+              icon: Icons.subtitles,
+              title: 'Subtitle to translate',
+              subtitle: currentLabel,
+              onTap: () => showSelectionDialog<String>(
+                title: 'Subtitle to translate',
+                items: subtitleLabels,
+                selectedItem: currentLabel.obs,
+                getTitle: (label) => label,
+                onItemSelected: (label) =>
+                    _translateSubtitleLabel.value = label,
+              ),
+            );
+          }),
           Obx(() {
             if (!_autoTranslate.value) return const SizedBox.shrink();
             return AnymeXTile(

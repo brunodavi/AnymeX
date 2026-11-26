@@ -102,6 +102,9 @@ class MediaDownloader {
   final bool autoTranslate;
   final String? translateTo;
 
+  /// Quando informado, somente a legenda com este label e traduzida.
+  final String? translateSubtitleLabel;
+
   final List<String> _auxTaskIds = <String>[];
   int? _ffmpegSessionId;
 
@@ -125,6 +128,7 @@ class MediaDownloader {
     this.episodeNumber,
     this.autoTranslate = false,
     this.translateTo,
+    this.translateSubtitleLabel,
   });
 
   static Future<void> initializeIsolatePool({int poolSize = 6}) async {
@@ -429,6 +433,10 @@ class MediaDownloader {
     final inputs = <_SubtitleInput>[];
     if (episodeNumber == null || subDownloadDir == null) return inputs;
 
+    // Mesmo que dois labels sejam iguais, no maximo uma faixa e traduzida.
+    var translatedOne = false;
+    final selectedLabel = translateSubtitleLabel?.trim().toLowerCase();
+
     final subFolder =
         path.join(subDownloadDir!, 'Episode_${episodeNumber}_subs');
     for (final element in subtitles ?? <hive.Track>[]) {
@@ -465,9 +473,15 @@ class MediaDownloader {
           language: sourceLanguage,
         ));
 
+        final isSelectedForTranslation = selectedLabel != null &&
+            selectedLabel.isNotEmpty &&
+            label.trim().toLowerCase() == selectedLabel;
+
         if (autoTranslate &&
             translateTo != null &&
             translateTo != 'none' &&
+            !translatedOne &&
+            isSelectedForTranslation &&
             !_sameLanguage(sourceLanguage, translateTo!)) {
           try {
             final content = await subtitleFile.readAsString();
@@ -491,6 +505,7 @@ class MediaDownloader {
                 codec: 'srt',
                 language: translateTo,
               ));
+              translatedOne = true;
               Logger.i('[Download] Legenda traduzida: $translatedLabel');
             }
           } catch (e) {
