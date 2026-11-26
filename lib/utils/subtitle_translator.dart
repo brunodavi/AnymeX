@@ -15,6 +15,29 @@ class SubtitleTranslator {
 
   static final Map<String, String> _cache = {};
 
+  /// Codigos antigos que possam estar salvos nas configuracoes (ou vindos de
+  /// labels de servidores) sao convertidos para chaves suportadas.
+  static String normalizeTargetLang(String code) {
+    final trimmed = code.trim();
+    if (trimmed.isEmpty) return 'en';
+    if (languages.containsKey(trimmed)) return trimmed;
+
+    const aliases = <String, String>{
+      'en-us': 'en', 'en-gb': 'en', 'eng': 'en',
+      'es-419': 'es', 'spa': 'es',
+      'pt-pt': 'pt', 'por': 'pt-BR',
+      'zh': 'zh-CN', 'chi': 'zh-CN', 'zho': 'zh-CN',
+      'jp': 'ja', 'jpn': 'ja',
+      'kr': 'ko', 'kor': 'ko',
+      'fre': 'fr', 'fra': 'fr',
+      'ger': 'de', 'deu': 'de',
+      'ita': 'it', 'rus': 'ru', 'hin': 'hi', 'ind': 'id',
+      'vie': 'vi', 'tha': 'th', 'ara': 'ar', 'tur': 'tr',
+      'dut': 'nl', 'nld': 'nl', 'pol': 'pol', 'swe': 'sv',
+    };
+    return aliases[trimmed.toLowerCase()] ?? 'en';
+  }
+
   static final Map<String, String> languages = {
     'none': 'None (Original)',
     'en': 'English',
@@ -41,14 +64,15 @@ class SubtitleTranslator {
   };
 
   static Future<String> translate(String text, String targetLang) async {
-    if (targetLang == 'none' || text.trim().isEmpty) return text;
-    final cacheKey = '$targetLang::${text.trim()}';
+    final target = normalizeTargetLang(targetLang);
+    if (target == 'none' || text.trim().isEmpty) return text;
+    final cacheKey = '$target::${text.trim()}';
     final cached = _cache[cacheKey];
     if (cached != null) return cached;
 
     try {
       final uri = Uri.parse(
-        '$_endpoint&sl=auto&tl=${Uri.encodeComponent(targetLang)}&dt=t&q=${Uri.encodeComponent(text.trim())}',
+        '$_endpoint&sl=auto&tl=${Uri.encodeComponent(target)}&dt=t&q=${Uri.encodeComponent(text.trim())}',
       );
       final response = await http.get(uri).timeout(const Duration(seconds: 5));
       if (response.statusCode != 200) return text;
@@ -77,7 +101,8 @@ class SubtitleTranslator {
     String targetLang, {
     int concurrency = 6,
   }) async {
-    if (cues.isEmpty || targetLang == 'none') return cues;
+    final target = normalizeTargetLang(targetLang);
+    if (cues.isEmpty || target == 'none') return cues;
 
     final uniqueTexts = <String>[];
     final seen = <String>{};
@@ -88,15 +113,15 @@ class SubtitleTranslator {
     }
 
     Logger.i(
-      '[Translate] ${uniqueTexts.length} texto(s) único(s) para $targetLang',
+      '[Translate] ${uniqueTexts.length} texto(s) único(s) para $target',
     );
 
     for (var i = 0; i < uniqueTexts.length; i += concurrency) {
       final batch = uniqueTexts.skip(i).take(concurrency).toList();
       await Future.wait(
         batch.map((text) async {
-          final result = await translate(text, targetLang);
-          if (result != text) _cache['$targetLang::$text'] = result;
+          final result = await translate(text, target);
+          if (result != text) _cache['$target::$text'] = result;
         }),
       );
     }
@@ -106,7 +131,7 @@ class SubtitleTranslator {
           (c) => SubtitleCue(
             start: c.start,
             end: c.end,
-            text: _cache['$targetLang::${c.text.trim()}'] ?? c.text,
+            text: _cache['$target::${c.text.trim()}'] ?? c.text,
           ),
         )
         .toList();
@@ -131,7 +156,8 @@ class SubtitleTranslator {
     required String content,
     required String targetLang,
   }) async {
-    if (targetLang == 'none') return null;
+    final target = normalizeTargetLang(targetLang);
+    if (target == 'none') return null;
     try {
       final cues = await SubParser.parseSubtitles(content);
       if (cues.isEmpty) return null;
@@ -141,7 +167,7 @@ class SubtitleTranslator {
         );
         return null;
       }
-      final translated = await translateCues(cues, targetLang);
+      final translated = await translateCues(cues, target);
       return buildSrt(translated);
     } catch (e) {
       Logger.e('[Translate] Falha ao traduzir legenda: $e');

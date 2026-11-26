@@ -43,6 +43,10 @@ class DownloadController extends GetxController {
       <DownloadedMediaSummary>[].obs;
   final RxBool isInitialized = false.obs;
 
+  /// Evita que varios episodios de um mesmo lote disparem resyncs simultaneos
+  /// (e, por consequencia, atualizacoes de listas reativas durante um build).
+  bool _isResyncing = false;
+
   final RxMap<String, DownloadedMediaMeta> mediaMetaCache =
       <String, DownloadedMediaMeta>{}.obs;
   final RxMap<String, DownloadedMangaMeta> mangaMetaCache =
@@ -92,6 +96,15 @@ class DownloadController extends GetxController {
     _lastSpeedTimestamp.remove(taskId);
     _lastSpeedProgress.remove(taskId);
     _lastSpeedBytes.remove(taskId);
+  }
+
+  /// Notifica listeners da UI no proximo frame. Evita "setState()/refresh
+  /// during build" quando o download termina enquanto o usuario navega.
+  void _refreshActiveTasks() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final tasks = activeTasks;
+      tasks.refresh();
+    });
   }
 
   double getTaskSpeed(String taskId) {
@@ -536,7 +549,7 @@ class DownloadController extends GetxController {
             if (isTerminal) {
               _clearSpeed(taskId);
               _lastProgressUpdate.remove(taskId);
-              activeTasks.refresh();
+              _refreshActiveTasks();
               _saveActiveTasks();
               if (statusStr == 'completed') {
                 _activeFileTasks.remove(taskId);
@@ -551,7 +564,7 @@ class DownloadController extends GetxController {
               if (last == null ||
                   now.difference(last).inMilliseconds > _progressThrottleMs) {
                 _lastProgressUpdate[taskId] = now;
-                activeTasks.refresh();
+                _refreshActiveTasks();
               }
             }
           }
@@ -844,6 +857,8 @@ class DownloadController extends GetxController {
     Map<String, String>? firstEpisodeHeaders,
     List<hive.Track>? firstEpisodeSubtitles,
     List<hive.Track>? firstEpisodeAudios,
+    bool autoTranslateSubtitles = false,
+    String? subtitleTranslateTo,
     bool isFromMetadataPage = true,
   }) async {
     final mediaTitle = media.name ?? 'Unknown';
@@ -871,6 +886,8 @@ class DownloadController extends GetxController {
         videoHeaders: i == 0 ? firstEpisodeHeaders : null,
         videoSubtitles: i == 0 ? firstEpisodeSubtitles : null,
         videoAudios: i == 0 ? firstEpisodeAudios : null,
+        autoTranslateSubtitles: autoTranslateSubtitles,
+        subtitleTranslateTo: subtitleTranslateTo,
         media: media,
       );
     }
@@ -886,6 +903,8 @@ class DownloadController extends GetxController {
     Map<String, String>? videoHeaders,
     List<hive.Track>? videoSubtitles,
     List<hive.Track>? videoAudios,
+    bool autoTranslateSubtitles = false,
+    String? subtitleTranslateTo,
     required OfflineMedia media,
   }) {
     activeTasks.removeWhere((t) =>
@@ -914,6 +933,8 @@ class DownloadController extends GetxController {
       videoHeaders: videoHeaders,
       subtitles: videoSubtitles,
       audios: videoAudios,
+      autoTranslateSubtitles: autoTranslateSubtitles,
+      subtitleTranslateTo: subtitleTranslateTo,
       media: media,
     );
 
@@ -970,14 +991,14 @@ class DownloadController extends GetxController {
         if (source == null) {
           task.status = DownloadStatus.failed;
           task.errorMessage = 'Source not found for resuming scrape';
-          activeTasks.refresh();
+          _refreshActiveTasks();
           _activeTaskCount--;
           return;
         }
 
         _isFetching = true;
         task.status = DownloadStatus.fetchingServer;
-        activeTasks.refresh();
+        _refreshActiveTasks();
         _saveActiveTasks();
         _updateNotification();
 
@@ -1004,7 +1025,7 @@ class DownloadController extends GetxController {
           task.status = DownloadStatus.awaitingServerSelection;
           task.errorMessage = 'No servers found. Please select manually.';
           task.availableServers = [];
-          activeTasks.refresh();
+          _refreshActiveTasks();
           _saveActiveTasks();
           _activeTaskCount--;
           _processScrapeQueue();
@@ -1021,7 +1042,7 @@ class DownloadController extends GetxController {
           task.status = DownloadStatus.awaitingServerSelection;
           task.errorMessage =
               'No server matched "${preferredQuality ?? '720p'}". Please select manually.';
-          activeTasks.refresh();
+          _refreshActiveTasks();
           _saveActiveTasks();
           _activeTaskCount--;
           _processScrapeQueue();
@@ -1043,7 +1064,7 @@ class DownloadController extends GetxController {
       if (task.videoUrl.isEmpty) {
         task.status = DownloadStatus.failed;
         task.errorMessage = 'Empty video URL';
-        activeTasks.refresh();
+        _refreshActiveTasks();
         _activeTaskCount--;
         return;
       }
@@ -1068,7 +1089,7 @@ class DownloadController extends GetxController {
       final linkType = detectLinkType(task.videoUrl);
 
       task.status = DownloadStatus.downloading;
-      activeTasks.refresh();
+      _refreshActiveTasks();
       _saveActiveTasks();
       _updateNotification();
 
@@ -1108,6 +1129,8 @@ class DownloadController extends GetxController {
         headers: chosenVideo?.headers ?? task.videoHeaders,
         concurrentDownloads: Get.find<Settings>().hlsParallelSegments.value,
         episodeNumber: task.episode.number,
+        autoTranslate: task.autoTranslateSubtitles,
+        translateTo: task.subtitleTranslateTo,
       );
 
       final subFolder =
@@ -1134,7 +1157,7 @@ class DownloadController extends GetxController {
         if (last == null ||
             now.difference(last).inMilliseconds > _progressThrottleMs) {
           _lastProgressUpdate[task.taskId] = now;
-          activeTasks.refresh();
+          _refreshActiveTasks();
           _updateNotification();
         }
       });
@@ -1145,8 +1168,13 @@ class DownloadController extends GetxController {
         task.subtitles = null;
         task.audios = null;
       } else {
-        // Fallback: mantem audio/legendas como faixas externas.
+        // Fallback: mantem audio/legendas como faixas externas. O downloader
+        // devolve as legendas persistidas (originais + traduzida) aqui; para
+        // downloads diretos, onde nao ha mux, mantemos as do servidor.
         task.audios = downloadResult.audioTracks ?? <hive.Track>[];
+        if (downloadResult.subtitleTracks != null) {
+          task.subtitles = downloadResult.subtitleTracks;
+        }
       }
 
       _clearSpeed(task.taskId);
@@ -1170,7 +1198,7 @@ class DownloadController extends GetxController {
       if (torrentHash != null) {
         await TorrentService.instance.releaseDownload(torrentHash);
       }
-      activeTasks.refresh();
+      _refreshActiveTasks();
       _saveActiveTasks();
     }
   }
@@ -1203,10 +1231,13 @@ class DownloadController extends GetxController {
       if (pct.isNotEmpty) pct,
       if (queued > 0) '$queued queued',
     ].join(' · ');
+    final safeContext = Get.key.currentContext ?? Get.context;
     _sendToBackground({
       'type': 'UPDATE_NOTIFICATION',
       'title': title,
-      'text': text.isNotEmpty ? text : Get.context!.l10n.downloading
+      'text': text.isNotEmpty
+          ? text
+          : safeContext?.l10n.downloading ?? 'Downloading...'
     });
   }
 
@@ -1502,7 +1533,7 @@ class DownloadController extends GetxController {
     if (task != null) {
       dl.DownloadIsolatePool.instance.cancelTask(taskId);
       task.status = DownloadStatus.paused;
-      activeTasks.refresh();
+      _refreshActiveTasks();
     } else if (mangaTask != null) {
       dl.DownloadIsolatePool.instance.cancelTask(taskId);
       mangaTask.status = MangaDownloadStatus.paused;
@@ -1520,7 +1551,7 @@ class DownloadController extends GetxController {
 
     if (task != null) {
       task.status = DownloadStatus.queued;
-      activeTasks.refresh();
+      _refreshActiveTasks();
       _runEpisodeDownload(task: task);
     } else if (mangaTask != null) {
       mangaTask.status = MangaDownloadStatus.queued;
@@ -1572,7 +1603,7 @@ class DownloadController extends GetxController {
     final task = activeTasks.firstWhereOrNull((t) => t.taskId == taskId);
     if (task != null) {
       task.status = DownloadStatus.cancelled;
-      activeTasks.refresh();
+      _refreshActiveTasks();
     }
   }
 
@@ -1943,12 +1974,16 @@ class DownloadController extends GetxController {
   }
 
   Future<void> _loadIndex() async {
+    if (_isResyncing) return;
+    _isResyncing = true;
     try {
       final root = await _getRootDir();
       _ensureNoMediaInTempDirs(root.path);
       await resyncDownloads();
     } catch (e) {
       debugPrint('DownloadController: error loading index: $e');
+    } finally {
+      _isResyncing = false;
     }
   }
 
@@ -2367,7 +2402,10 @@ class DownloadController extends GetxController {
         flush: true,
       );
 
-      downloadedMedia.value = verifiedSummaries;
+      final summaries = verifiedSummaries;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        downloadedMedia.value = summaries;
+      });
     } catch (e) {
       debugPrint('DownloadController: error resyncing downloads: $e');
     }
@@ -2930,7 +2968,7 @@ class DownloadController extends GetxController {
       await _downloadSubtitles(task, selectedVideo.subtitles!);
     }
 
-    activeTasks.refresh();
+    _refreshActiveTasks();
     _saveActiveTasks();
 
     _runEpisodeDownload(task: task);

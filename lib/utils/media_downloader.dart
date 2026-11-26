@@ -204,6 +204,41 @@ class MediaDownloader {
     return cleaned.isEmpty ? 'und' : cleaned;
   }
 
+  /// Converte qualquer codigo/label de idioma para ISO 639-2 (3 letras),
+  /// que e o formato aceito pelo metadata de linguagem do Matroska.
+  static String iso6392Language(String? code) {
+    final raw = (code ?? '').trim().toLowerCase();
+    if (raw.isEmpty || raw == 'none' || raw == 'und') return 'und';
+
+    const aliases = <String, String>{
+      'pt': 'por', 'pt-br': 'por', 'pt-pt': 'por', 'por': 'por',
+      'en': 'eng', 'en-us': 'eng', 'en-gb': 'eng', 'eng': 'eng',
+      'ja': 'jpn', 'jpn': 'jpn',
+      'ko': 'kor', 'kor': 'kor',
+      'es': 'spa', 'es-419': 'spa', 'spa': 'spa',
+      'fr': 'fra', 'fra': 'fra',
+      'de': 'deu', 'deu': 'deu',
+      'it': 'ita', 'ita': 'ita',
+      'ru': 'rus', 'rus': 'rus',
+      'zh': 'zho', 'zh-cn': 'zho', 'zh-tw': 'zho', 'zho': 'zho', 'chi': 'zho',
+      'hi': 'hin', 'hin': 'hin',
+      'id': 'ind', 'ind': 'ind',
+      'vi': 'vie', 'vie': 'vie',
+      'th': 'tha', 'tha': 'tha',
+      'ar': 'ara', 'ara': 'ara',
+      'tr': 'tur', 'tur': 'tur',
+      'nl': 'nld', 'nld': 'nld',
+      'pl': 'pol', 'pol': 'pol',
+      'sv': 'swe', 'swe': 'swe',
+    };
+
+    final mapped = aliases[raw];
+    if (mapped != null) return mapped;
+    // Codigos ISO 639-2 ja estao em 3 letras; qualquer outra coisa (ex. um
+    // label como "legendado" capturado por _languageCode) vira "und".
+    return RegExp(r'^[a-z]{3}$').hasMatch(raw) ? raw : 'und';
+  }
+
   /// Usado para nao traduzir uma legenda que ja esta no idioma desejado.
   static String subtitleLanguageCode(String label) => _languageCode(label);
 
@@ -667,6 +702,9 @@ class MediaDownloader {
       if (embeddedAudioCount > 0) ...['-map', '0:a?'],
       for (var i = 0; i < audios.length; i++) ...['-map', '${i + 1}:a:0'],
       '-c:a', 'copy',
+      // Copia as legendas como estao (SRT/ASS). O build "min" do ffmpeg-kit
+      // nao garante os encoders de legenda; copiar evita depender deles.
+      '-c:s', 'copy',
     ];
 
     for (var i = 0; i < embeddedAudioCount; i++) {
@@ -682,7 +720,8 @@ class MediaDownloader {
       final outIndex = embeddedAudioCount + i;
       args.addAll([
         '-metadata:s:a:$outIndex', 'title=${audio.label}',
-        '-metadata:s:a:$outIndex', 'language=${audio.language}',
+        '-metadata:s:a:$outIndex',
+        'language=${iso6392Language(audio.language)}',
       ]);
       if (embeddedAudioCount == 0 && i == 0) {
         args.addAll(['-disposition:a:0', 'default']);
@@ -694,10 +733,9 @@ class MediaDownloader {
       final sub = subtitles[i];
       args.addAll([
         '-map', '${subtitleInputOffset + i}:s:0',
-        '-c:s:$i', sub.codec,
         '-metadata:s:s:$i', 'title=${sub.label}',
         '-metadata:s:s:$i',
-        'language=${sub.language ?? _languageCode(sub.label)}',
+        'language=${iso6392Language(sub.language ?? _languageCode(sub.label))}',
       ]);
       if (i == 0) args.addAll(['-disposition:s:$i', 'default']);
     }

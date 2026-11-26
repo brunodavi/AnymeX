@@ -1516,7 +1516,7 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
         return;
       }
       subtitleText.value = e;
-      if (!playerSettings.autoTranslate) {
+      if (!playerSettings.autoTranslate || _isAlreadyTranslatedTrack()) {
         if (translatedSubtitle.value.isNotEmpty) {
           translatedSubtitle.value = '';
         }
@@ -2616,7 +2616,9 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     selectedSubsTrack.value = subtitleTrack;
     _applySubtitleTrack(subtitleTrack);
 
-    if (playerSettings.autoTranslate && track.file != null) {
+    if (playerSettings.autoTranslate &&
+        track.file != null &&
+        !_isAlreadyTranslatedTrack(track.label)) {
       startPreTranslation(subtitleUrl);
     }
   }
@@ -2673,17 +2675,27 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     }
   }
 
+  /// Legendas ja traduzidas durante o download nao devem passar pela
+  /// traducao ao vivo/pre-transducao novamente.
+  bool _isAlreadyTranslatedTrack([String? label]) {
+    final externalLabel = label ?? selectedExternalSub.value?.label ?? '';
+    final embeddedTitle = selectedSubsTrack.value?.title ?? '';
+    return externalLabel.contains('(Google Translate)') ||
+        embeddedTitle.contains('(Google Translate)');
+  }
+
   void triggerPreTranslation() {
     final subtitleUrl = selectedExternalSub.value.file;
     if (subtitleUrl != null &&
         subtitleUrl.isNotEmpty &&
-        playerSettings.autoTranslate) {
+        playerSettings.autoTranslate &&
+        !_isAlreadyTranslatedTrack()) {
       startPreTranslation(subtitleUrl);
     }
   }
 
   void startPreTranslation(String subtitleUrl) async {
-    if (isPreTranslating.value) {
+    if (isPreTranslating.value || _isAlreadyTranslatedTrack()) {
       return;
     }
 

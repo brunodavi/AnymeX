@@ -95,7 +95,8 @@ class _SettingsPlayerSubtitlesState extends State<SettingsPlayerSubtitles> {
       title: 'Translation Language',
       items: SubtitleTranslator.languages.keys.toList(),
       selectedItem: settings.playerSettings.value.translateTo.obs,
-      getTitle: (code) => SubtitleTranslator.languages[code]!,
+      getTitle: (code) =>
+          SubtitleTranslator.languages[code] ?? code,
       onItemSelected: (code) {
         settings.playerSettings.update((s) => s?.translateTo = code);
         PlayerSettingsKeys.translateTo.set(code);
@@ -365,7 +366,7 @@ class _SettingsPlayerSubtitlesState extends State<SettingsPlayerSubtitles> {
                       .playerSettings.value.preferredSubtitleLanguage.obs,
                   getTitle: (code) => code == 'none'
                       ? 'None (Disabled)'
-                      : SubtitleTranslator.languages[code]!,
+                      : SubtitleTranslator.languages[code] ?? code,
                   onItemSelected: (code) {
                     settings.preferredSubtitleLanguage = code;
                     setState(() {});

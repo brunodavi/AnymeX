@@ -134,6 +134,8 @@ class BackgroundDownloadTaskHandler extends TaskHandler {
     final audios = audiosRaw
         ?.map((e) => hive.Track.fromJson(e as Map<String, dynamic>))
         .toList();
+    final autoTranslate = task['autoTranslateSubtitles'] as bool? ?? false;
+    final translateTo = task['subtitleTranslateTo'] as String?;
 
     final headers = headersraw?.map((k, v) => MapEntry(k, v.toString()));
 
@@ -157,6 +159,8 @@ class BackgroundDownloadTaskHandler extends TaskHandler {
       episodeNumber: episodeNumber,
       subtitles: subtitles,
       audios: audios,
+      autoTranslate: autoTranslate,
+      translateTo: translateTo,
     );
 
     try {
@@ -187,7 +191,9 @@ class BackgroundDownloadTaskHandler extends TaskHandler {
         'filePath': downloadResult.filePath,
         if (downloadResult.tracksMuxed) 'tracksMuxed': true,
         if (!downloadResult.tracksMuxed) ...{
-          'subtitles': subtitles?.map((e) => e.toJson()).toList() ?? [],
+          'subtitles': (downloadResult.subtitleTracks ?? subtitles ?? [])
+              .map((e) => e.toJson())
+              .toList(),
           'audios': (downloadResult.audioTracks ?? audios ?? [])
               .map((e) => e.toJson())
               .toList(),

@@ -5,9 +5,12 @@ import 'package:anymex/screens/downloads/model/download_models.dart';
 import 'package:anymex/database/isar_models/episode.dart';
 import 'package:anymex/database/isar_models/video.dart' as hive;
 import 'package:anymex/utils/language.dart';
+import 'package:anymex/utils/subtitle_translator.dart';
 import 'package:anymex/utils/theme_extensions.dart';
 import 'package:anymex/widgets/anymex_widgets/anymex_text.dart';
+import 'package:anymex/widgets/anymex_widgets/anymex_tile.dart';
 import 'package:anymex/widgets/helper/tv_wrapper.dart';
+import 'package:anymex/widgets/non_widgets/reusable_checkmark.dart';
 import 'package:anymex/database/isar_models/offline_media.dart';
 import 'package:anymex/widgets/non_widgets/snackbar.dart';
 import 'package:anymex_extension_runtime_bridge/anymex_extension_runtime_bridge.dart';
@@ -68,6 +71,8 @@ class _DownloadServerSelectorState extends State<DownloadServerSelector> {
   final _isLoading = true.obs;
   final _errorMsg = Rxn<String>();
   final _selectedQuality = RxnString();
+  final _autoTranslate = false.obs;
+  final _translateTo = 'pt-BR'.obs;
   bool _isDisposed = false;
   String? _cancelToken;
   StreamSubscription? _streamSubscription;
@@ -196,6 +201,8 @@ class _DownloadServerSelectorState extends State<DownloadServerSelector> {
     }
 
     if (!context.mounted) return;
+    // Captura o texto antes do pop: depois disso o context pode estar inativo.
+    final startedTitle = context.l10n.downloadStarted;
     Navigator.pop(context, true);
 
     await downloadController.enqueueDownloadBatch(
@@ -210,11 +217,13 @@ class _DownloadServerSelectorState extends State<DownloadServerSelector> {
           widget.episodes.length == 1 ? selectedVideo?.subtitles : null,
       firstEpisodeAudios:
           widget.episodes.length == 1 ? selectedVideo?.audios : null,
+      autoTranslateSubtitles: _autoTranslate.value,
+      subtitleTranslateTo: _autoTranslate.value ? _translateTo.value : null,
       isFromMetadataPage: widget.isFromMetadataPage,
     );
     snackBar(
       'Downloading ${widget.episodes.length} episode${widget.episodes.length != 1 ? 's' : ''}...',
-      title: Get.context!.l10n.downloadStarted,
+      title: startedTitle,
     );
   }
 
@@ -562,48 +571,106 @@ class _DownloadServerSelectorState extends State<DownloadServerSelector> {
   Widget _buildFooter(ColorScheme theme) {
     return Obx(() {
       final canDownload = _selectedQuality.value != null && _servers.isNotEmpty;
-      return SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-          child: AnymexOnTap(
-            onTap: canDownload ? _startDownload : null,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
-              decoration: BoxDecoration(
-                color: canDownload ? theme.primary : theme.surfaceContainer,
-                borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(HugeIcons.strokeRoundedDownload04,
-                      size: 20,
-                      color: canDownload
-                          ? theme.onPrimary
-                          : theme.onSurface.opaque(0.4)),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: AnymeXText(canDownload
-                          ? 'Download (${widget.episodes.length} ep${widget.episodes.length != 1 ? 's' : ''}) · ${_selectedQuality.value}'
-                          : 'Loading servers...',
-                      size: 14,
-                      variant: TextVariant.semiBold,
-                      isMarquee: true,
-                      textAlign: TextAlign.center,
-                      color: canDownload
-                          ? theme.onPrimary
-                          : theme.onSurface.opaque(0.4),
-                    ),
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildTranslationOptions(theme),
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: AnymexOnTap(
+                onTap: canDownload ? _startDownload : null,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                      vertical: 16, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: canDownload
+                        ? theme.primary
+                        : theme.surfaceContainer,
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                ],
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(HugeIcons.strokeRoundedDownload04,
+                          size: 20,
+                          color: canDownload
+                              ? theme.onPrimary
+                              : theme.onSurface.opaque(0.4)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: AnymeXText(canDownload
+                              ? 'Download (${widget.episodes.length} ep${widget.episodes.length != 1 ? 's' : ''}) · ${_selectedQuality.value}'
+                              : 'Loading servers...',
+                          size: 14,
+                          variant: TextVariant.semiBold,
+                          isMarquee: true,
+                          textAlign: TextAlign.center,
+                          color: canDownload
+                              ? theme.onPrimary
+                              : theme.onSurface.opaque(0.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
-        ),
+        ],
       );
     });
+  }
+
+  Widget _buildTranslationOptions(ColorScheme theme) {
+    hive.Video? selected;
+    for (final video in _servers) {
+      if (video.quality == _selectedQuality.value) {
+        selected = video;
+        break;
+      }
+    }
+    if ((selected?.subtitles?.length ?? 0) == 0) {
+      return const SizedBox.shrink();
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Obx(() => AnymeXTile.toggle(
+                icon: HugeIcons.strokeRoundedTranslate,
+                title: context.l10n.autoTranslateSubtitles,
+                subtitle: 'Gera uma faixa traduzida e embute no download',
+                value: _autoTranslate.value,
+                onChanged: (value) => _autoTranslate.value = value,
+              )),
+          Obx(() {
+            if (!_autoTranslate.value) return const SizedBox.shrink();
+            return AnymeXTile(
+              icon: Icons.language,
+              title: context.l10n.translateTo,
+              subtitle:
+                  SubtitleTranslator.languages[_translateTo.value] ??
+                  _translateTo.value,
+              onTap: () => showSelectionDialog<String>(
+                title: context.l10n.translateTo,
+                items: SubtitleTranslator.languages.keys
+                    .where((code) => code != 'none')
+                    .toList(),
+                selectedItem: _translateTo,
+                getTitle: (code) =>
+                    SubtitleTranslator.languages[code] ?? code,
+                onItemSelected: (code) => _translateTo.value = code,
+              ),
+            );
+          }),
+        ],
+      ),
+    );
   }
 
   void _showTracksDialog(
