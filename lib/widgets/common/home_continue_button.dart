@@ -1,12 +1,16 @@
 import 'package:anymex/controllers/media_mode_controller.dart';
+import 'package:anymex/controllers/offline/offline_storage_controller.dart';
 import 'package:anymex/controllers/settings/methods.dart';
 import 'package:anymex/database/isar_models/offline_media.dart';
+import 'package:anymex/l10n/l10n_extension.dart';
 import 'package:anymex/screens/library/widgets/history_model.dart';
 import 'package:anymex/utils/function.dart';
 import 'package:anymex/utils/theme_extensions.dart';
 import 'package:anymex/widgets/anymex_widgets/anymex_image.dart';
 import 'package:anymex/widgets/anymex_widgets/anymex_linear_indicator.dart';
 import 'package:anymex/widgets/anymex_widgets/anymex_text.dart';
+import 'package:anymex/widgets/anymex_widgets/anymex_dialog.dart';
+import 'package:anymex/widgets/non_widgets/snackbar.dart';
 import 'package:anymex_extension_runtime_bridge/anymex_extension_runtime_bridge.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -39,6 +43,37 @@ class _HomeContinueWatchingBarState extends State<HomeContinueWatchingBar> {
   void _handleContinue(OfflineMedia item) {
     HapticFeedback.lightImpact();
     HistoryModel.fromOfflineMedia(item, ItemType.anime).onTap?.call();
+  }
+
+  void _handleOpenDetails(OfflineMedia item) {
+    HapticFeedback.lightImpact();
+    HistoryModel.fromOfflineMedia(item, ItemType.anime).onCoverTap?.call();
+  }
+
+  void _handleRemove(OfflineMedia item) {
+    HapticFeedback.lightImpact();
+    final mediaId = item.mediaId ?? '';
+    if (mediaId.isEmpty) {
+      snackBar('Unable to remove this item from history');
+      return;
+    }
+
+    final dialogContext = Get.key.currentContext ?? Get.context;
+    if (dialogContext == null) return;
+
+    AnymeXDialog(
+      title: dialogContext.l10n.removeFromHistory,
+      contentWidget: AnymeXText(
+        'Are you sure you want to remove "${item.name}" from your history?',
+        size: 14,
+      ),
+      onConfirm: () async {
+        await Get.find<OfflineStorageController>().clearMediaHistory(
+              mediaId,
+              mediaType: ItemType.anime,
+            );
+      },
+    ).show(dialogContext);
   }
 
   @override
@@ -146,7 +181,7 @@ class _HomeContinueWatchingBarState extends State<HomeContinueWatchingBar> {
     final progress = total > 0 ? (current / total).clamp(0.0, 1.0) : 0.0;
 
     return GestureDetector(
-      onTap: () => _handleContinue(item),
+      onTap: () => _handleOpenDetails(item),
       behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 300),
@@ -225,6 +260,23 @@ class _HomeContinueWatchingBarState extends State<HomeContinueWatchingBar> {
                   Icons.play_arrow_rounded,
                   size: 16,
                   color: theme.colorScheme.onPrimary,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => _handleRemove(item),
+              child: Container(
+                height: 32,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.errorContainer,
+                  borderRadius: BorderRadius.circular(32.multiplyRadius()),
+                ),
+                child: Icon(
+                  Icons.delete_outline_rounded,
+                  size: 16,
+                  color: theme.colorScheme.onErrorContainer,
                 ),
               ),
             ),
