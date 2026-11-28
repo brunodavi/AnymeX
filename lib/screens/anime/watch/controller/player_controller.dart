@@ -1588,7 +1588,18 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     _playerSubscriptions.add(_basePlayer.completedStream.listen((e) {
       if (_isReloadingPlayer.value) return;
       if (e && !isOffline.value) {
-        hasNextEpisode ? navigator(true) : Get.back();
+        if (hasNextEpisode) {
+          // Navigate to the next episode automatically.
+          navigator(true).catchError((error, stack) {
+            Logger.e('Auto next-episode failed: $error');
+            // Fallback: the player's "episode ended" event failed to navigate
+            // (some sources/plugins don't fire it reliably). Force the same
+            // action the user would do manually: reload the next episode.
+            unawaited(_forceAutoNextEpisode());
+          });
+        } else {
+          Get.back();
+        }
       }
     }));
   }
@@ -2940,22 +2951,42 @@ class PlayerController extends GetxController with WidgetsBindingObserver {
     return isLabelMatch;
   }
 
-  void navigator(bool forward) {
+  Future<void> navigator(bool forward) async {
     if (forward) {
       if (playerSettings.autoSkipFiller) {
         final targetEpisode = _getNextNonFillerEpisode();
         if (targetEpisode != null) {
-          changeEpisode(targetEpisode);
+          await changeEpisode(targetEpisode);
         } else if (hasNextEpisode) {
-          changeEpisode(nextEpisode!);
+          await changeEpisode(nextEpisode!);
         }
-      } else {
-        changeEpisode(nextEpisode!);
+      } else if (hasNextEpisode) {
+        await changeEpisode(nextEpisode!);
       }
     } else if (hasPreviousEpisode) {
-      changeEpisode(previousEpisode!);
+      await changeEpisode(previousEpisode!);
     }
     onUserInteraction();
+  }
+
+  /// Fallback navigation: forces the same action the user does when they
+  /// manually tap the next episode from the list. This is used when the
+  /// player's "episode ended" event fails to navigate automatically (some
+  /// sources/plugins don't fire it reliably).
+  Future<void> _forceAutoNextEpisode() async {
+    try {
+      if (!hasNextEpisode) return;
+      final next = nextEpisode!;
+      // Ensure the player is in a clean state before navigating.
+      _isReloadingPlayer.value = true;
+      try {
+        await navigator(true);
+      } finally {
+        _isReloadingPlayer.value = false;
+      }
+    } catch (e) {
+      Logger.e('Force auto next-episode failed: $e');
+    }
   }
 
   Episode? _getNextNonFillerEpisode() {
